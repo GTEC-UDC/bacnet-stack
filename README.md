@@ -1,5 +1,40 @@
 # BACnet Stack 
 
+This is a fork of [bacnet-stack](https://github.com/bacnet-stack/bacnet-stack) with two new apps: `readpropmjson` and `readpropmbyname`. These apps are based on the `bacrpm` app and provide additional functionalities.
+
+The `bacrpm` app included in [bacnet-stack](https://github.com/bacnet-stack/bacnet-stack) allows reading multiple BACnet properties. Its usage is as follows:
+```
+bacrpm device-instance 
+    object-type object-instance property[index][,property[index]]
+    [object-type ...] [--version][--help]
+```
+
+The `readpropmjson` app is a new app based on `bacrpm` that returns the retrieved BACnet values in a JSON format and also allows specifying the IP address of the BACnet controller. Its usage is as follows:
+```
+readpropmjson [--dnet N] [--dadr A] [--mac A] device-instance
+    object-type object-instance property[index][,property[index]]
+    [object-type ...] [--version][--help]
+```
+
+This app requires the *cJSON* library.
+
+The `readpropmbyname` app is another new app based on `readpropmjson` that allows recovering the present-value properties of BACnet objects specifying just theirs names (i.e., it does not need the object-instance and object-type). For this, an object data CSV file with the information of the object names and types is required to be passed in the `--csv` parameter. Its usage is as follows:
+```
+readpropmbyname [--dnet N] [--dadr A] [--mac A] --id device-instance
+    --csv object-data-file object-name [object-name ...]
+    [--version][--help]
+```
+
+The CSV file for this app must contain at least the columns `name`, `type_value`, and `address`. An example of this file and a python script for creating it from a BACnet/IP controller is provided in the [bacnet_get_objects_props](https://github.com/tombolano/bacnet_get_objects_props) repository.
+
+This app requires the *cJSON*, *glib-2.0*, and *libcsv* libraries.
+
+For additional information of these apps see the included help using the `--help` option.
+
+The original README of the [bacnet-stack](https://github.com/bacnet-stack/bacnet-stack) project is included below.
+
+---
+
 BACnet open source protocol stack for embedded systems, Linux, and Windows
 http://bacnet.sourceforge.net/
 
