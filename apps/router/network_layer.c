@@ -45,7 +45,8 @@ uint16_t process_network_message(BACMSG *msg, MSG_DATA *data, uint8_t **buff)
 
     memmove(data, msg->data, sizeof(MSG_DATA));
 
-    apdu_offset = npdu_decode(data->pdu, &data->dest, NULL, &npdu_data);
+    apdu_offset = bacnet_npdu_decode(data->pdu, data->pdu_len, &data->dest,
+        NULL, &npdu_data);
     apdu_len = data->pdu_len - apdu_offset;
 
     srcport = find_snet(msg->origin);
@@ -129,16 +130,18 @@ uint16_t process_network_message(BACMSG *msg, MSG_DATA *data, uint8_t **buff)
                     add_dnet(&srcport->route_info, net,
                         data->src); /* and update routing table */
                     if (data->pdu[apdu_offset + i + 3] >
-                        0) /* find next NET value */
+                        0) { /* find next NET value */
                         i = data->pdu[apdu_offset + i + 3] + 4;
-                    else
+                    } else {
                         i = i + 4;
+                    }
                 }
                 buff_len = create_network_message(
                     NETWORK_MESSAGE_INIT_RT_TABLE_ACK, data, buff, NULL);
-            } else
+            } else {
                 buff_len = create_network_message(
                     NETWORK_MESSAGE_INIT_RT_TABLE_ACK, data, buff, &buff);
+            }
             break;
 
         case NETWORK_MESSAGE_INIT_RT_TABLE_ACK:
@@ -152,10 +155,11 @@ uint16_t process_network_message(BACMSG *msg, MSG_DATA *data, uint8_t **buff)
                     add_dnet(&srcport->route_info, net,
                         data->src); /* and update routing table */
                     if (data->pdu[apdu_offset + i + 3] >
-                        0) /* find next NET value */
+                        0) { /* find next NET value */
                         i = data->pdu[apdu_offset + i + 3] + 4;
-                    else
+                    } else {
                         i = i + 4;
+                    }
                 }
             }
             break;
@@ -202,8 +206,9 @@ uint16_t create_network_message(
     bool data_expecting_reply = false;
     BACNET_NPDU_DATA npdu_data;
 
-    if (network_message_type == NETWORK_MESSAGE_INIT_RT_TABLE)
+    if (network_message_type == NETWORK_MESSAGE_INIT_RT_TABLE) {
         data_expecting_reply = true;
+    }
     init_npdu(&npdu_data, network_message_type, data_expecting_reply);
 
     *buff = (uint8_t *)malloc(128); /* resolve different length */
@@ -276,8 +281,9 @@ uint16_t create_network_message(
                         port = port->next;
                     }
                 }
-            } else
+            } else {
                 (*buff)[buff_len++] = (uint8_t)0;
+            }
             break;
 
         case NETWORK_MESSAGE_INVALID:

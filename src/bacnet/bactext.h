@@ -27,10 +27,6 @@
 /* tiny implementations have no need to print */
 #if PRINT_ENABLED
 #define BACTEXT_PRINT_ENABLED
-#else
-#ifdef BAC_TEST
-#define BACTEXT_PRINT_ENABLED
-#endif
 #endif
 
 #include <stdbool.h>
@@ -73,6 +69,9 @@ extern "C" {
     const char *bactext_event_type_name(
         unsigned index);
     BACNET_STACK_EXPORT
+    bool bactext_property_name_proprietary(
+        unsigned index);
+    BACNET_STACK_EXPORT
     const char *bactext_property_name(
         unsigned index);
     BACNET_STACK_EXPORT
@@ -87,6 +86,9 @@ extern "C" {
     bool bactext_property_strtol(
         const char *search_name,
         unsigned *found_index);
+    BACNET_STACK_EXPORT
+    bool bactext_engineering_unit_name_proprietary(
+        unsigned index);
     BACNET_STACK_EXPORT
     const char *bactext_engineering_unit_name(
         unsigned index);
@@ -205,6 +207,11 @@ extern "C" {
     BACNET_STACK_EXPORT
 	const char *bactext_lighting_transition(
 		unsigned index);
+
+    BACNET_STACK_EXPORT
+    const char *bactext_color_operation_name(
+        unsigned index);
+
 #ifdef __cplusplus
 }
 #endif /* __cplusplus */

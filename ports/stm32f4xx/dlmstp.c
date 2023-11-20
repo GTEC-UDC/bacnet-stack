@@ -37,10 +37,11 @@
 #include <stddef.h>
 #include <string.h>
 #include "bacnet/bacdef.h"
+#include "bacnet/datalink/cobs.h"
+#include "bacnet/datalink/crc.h"
 #include "bacnet/datalink/dlmstp.h"
 #include "bacnet/datalink/mstpdef.h"
 #include "rs485.h"
-#include "bacnet/datalink/crc.h"
 #include "bacnet/npdu.h"
 #include "bacnet/bits.h"
 #include "bacnet/bytes.h"
@@ -127,13 +128,17 @@ static volatile uint8_t Nmax_master = 127;
 /* that a node must wait for a station to begin replying to a */
 /* confirmed request: 255 milliseconds. (Implementations may use */
 /* larger values for this timeout, not to exceed 300 milliseconds.) */
+#ifndef Treply_timeout
 #define Treply_timeout 260
+#endif
 
 /* The time without a DataAvailable or ReceiveError event that a node must */
 /* wait for a remote node to begin using a token or replying to a Poll For */
 /* Master frame: 20 milliseconds. (Implementations may use larger values for */
 /* this timeout, not to exceed 35 milliseconds.) */
+#ifndef Tusage_timeout
 #define Tusage_timeout 30
+#endif
 
 /* The minimum number of DataAvailable or ReceiveError events that must be */
 /* seen by a receiving node in order to declare the line "active": 4. */
@@ -145,12 +150,16 @@ static volatile uint8_t Nmax_master = 127;
 /* not to exceed 100 milliseconds.) */
 /* At 9600 baud, 60 bit times would be about 6.25 milliseconds */
 /* const uint16_t Tframe_abort = 1 + ((1000 * 60) / 9600); */
+#ifndef Tframe_abort
 #define Tframe_abort 30
+#endif
 
 /* The maximum time a node may wait after reception of a frame that expects */
 /* a reply before sending the first octet of a reply or Reply Postponed */
 /* frame: 250 milliseconds. */
+#ifndef Treply_delay
 #define Treply_delay (250 - 50)
+#endif
 
 /* An array of octets, used to store octets for transmitting */
 /* OutputBuffer is indexed from 0 to OutputBufferSize-1. */
@@ -159,11 +168,7 @@ static uint8_t OutputBuffer[DLMSTP_MPDU_MAX];
 /* Number of bytes pending transmit. 0=nothing pending transmit  */
 uint16_t OutputBufferLength;
 
-/* stats for tx and rx of packets */
-static unsigned TransmitFrameCount;
-static unsigned ReceiveFrameCount;
-static unsigned TransmitPDUCount;
-static unsigned ReceivePDUCount;
+static struct dlmstp_statistics Statistics = { 0 };
 
 /* we need to be able to increment without rolling over */
 #define INCREMENT_AND_LIMIT_UINT8(x) \
@@ -174,6 +179,12 @@ static unsigned ReceivePDUCount;
 
 static volatile struct dlmstp_packet PDU_Buffer[MSTP_PDU_PACKET_COUNT];
 static RING_BUFFER PDU_Queue;
+
+/* Callback function to be called every time we receive a preamble */
+static dlmstp_hook_frame_rx_start_cb Preamble_Callback = NULL;
+
+/* Callback function to be called every time we receive a frame */
+static dlmstp_hook_frame_rx_complete_cb Frame_Rx_Callback = NULL;
 
 bool dlmstp_init(char *ifname)
 {
@@ -237,8 +248,8 @@ static bool dlmstp_compare_data_expecting_reply(uint8_t *request_pdu,
     /* decode the request data */
     request.address.mac[0] = src_address;
     request.address.mac_len = 1;
-    offset = npdu_decode(
-        &request_pdu[0], NULL, &request.address, &request.npdu_data);
+    offset = bacnet_npdu_decode(request_pdu, request_pdu_len, NULL,
+        &request.address, &request.npdu_data);
     if (request.npdu_data.network_layer_message) {
         return false;
     }
@@ -255,7 +266,8 @@ static bool dlmstp_compare_data_expecting_reply(uint8_t *request_pdu,
     /* decode the reply data */
     reply.address.mac[0] = dest_address;
     reply.address.mac_len = 1;
-    offset = npdu_decode(&reply_pdu[0], &reply.address, NULL, &reply.npdu_data);
+    offset = bacnet_npdu_decode(
+        reply_pdu, reply_pdu_len, &reply.address, NULL, &reply.npdu_data);
     if (reply.npdu_data.network_layer_message) {
         return false;
     }
@@ -352,6 +364,10 @@ static uint16_t MSTP_Create_Frame(uint8_t *buffer,
     uint16_t crc16 = 0xFFFF;
     /* used to load the data portion of the frame */
     uint16_t index = 0;
+    /* length of the COBS encoded frame */
+    uint16_t cobs_len;
+    /* true for COBS BACnet frames */
+    bool cobs_bacnet_frame = false;
 
     /* not enough to do a header */
     if (buffer_size < 8)
@@ -370,25 +386,58 @@ static uint16_t MSTP_Create_Frame(uint8_t *buffer,
     buffer[6] = data_len & 0xFF;
     crc8 = CRC_Calc_Header(buffer[6], crc8);
     buffer[7] = ~crc8;
-
     index = 8;
-    while (data_len && data && (index < buffer_size)) {
-        buffer[index] = *data;
-        crc16 = CRC_Calc_Data(buffer[index], crc16);
-        data++;
-        index++;
-        data_len--;
-    }
-    /* append the data CRC if necessary */
-    if (index > 8) {
-        if ((index + 2) <= buffer_size) {
-            crc16 = ~crc16;
-            buffer[index] = crc16 & 0xFF; /* LSB first */
-            index++;
-            buffer[index] = crc16 >> 8;
-            index++;
-        } else
+
+    if ((data_len > 501) || ((frame_type >= Nmin_COBS_type) &&
+        (frame_type <= Nmax_COBS_type))) {
+        /* COBS encoded frame */
+        if (frame_type == FRAME_TYPE_BACNET_DATA_EXPECTING_REPLY) {
+            frame_type = FRAME_TYPE_BACNET_EXTENDED_DATA_EXPECTING_REPLY;
+            cobs_bacnet_frame = true;
+        } else if (frame_type == FRAME_TYPE_BACNET_DATA_EXPECTING_REPLY) {
+            frame_type = FRAME_TYPE_BACNET_EXTENDED_DATA_NOT_EXPECTING_REPLY;
+            cobs_bacnet_frame = true;
+        } else if ((frame_type < Nmin_COBS_type) ||
+            (frame_type > Nmax_COBS_type)) {
+            /* I'm sorry, Dave, I'm afraid I can't do that. */
             return 0;
+        }
+        cobs_len = cobs_frame_encode(buffer, buffer_size, data, data_len);
+        /* check the results of COBs encoding for validity */
+        if (cobs_bacnet_frame) {
+            if (cobs_len < Nmin_COBS_length_BACnet) {
+                return 0;
+            } else if (cobs_len > Nmax_COBS_length_BACnet) {
+                return 0;
+            }
+        } else {
+            if (cobs_len < Nmin_COBS_length) {
+                return 0;
+            } else if (cobs_len > Nmax_COBS_length) {
+                return 0;
+            }
+        }
+        /* for COBS, we must subtract two before use as the
+           MS/TP frame length field since CRC32 is 2 bytes longer
+           than CRC16 in original MSTP and non-COBS devices need
+           to be able to ingest the entire frame */
+        index = index + cobs_len - 2;
+    } else if (data_len > 0) {
+        while (data_len && data && (index < buffer_size)) {
+            buffer[index] = *data;
+            crc16 = CRC_Calc_Data(buffer[index], crc16);
+            data++;
+            index++;
+            data_len--;
+        }
+        if ((index + 2) > buffer_size) {
+            return 0;
+        }
+        crc16 = ~crc16;
+        buffer[index] = crc16 & 0xFF; /* LSB first */
+        index++;
+        buffer[index] = crc16 >> 8;
+        index++;
     }
 
     return index; /* returns the frame length */
@@ -411,6 +460,13 @@ static void MSTP_Send_Frame(uint8_t frame_type,
     OutputBufferLength = MSTP_Create_Frame(OutputBuffer, sizeof(OutputBuffer),
         frame_type, destination, source, data, data_len);
     rs485_bytes_send(OutputBuffer, OutputBufferLength);
+
+    /* increment the transmitted frame count */
+    Statistics.transmit_frame_counter++;
+    /* if there was data, also increment transmitted pdu count */
+    if ((data != NULL) && (data_len > 0)) {
+        Statistics.transmit_pdu_counter++;
+    }
 }
 
 static void MSTP_Receive_Frame_FSM(void)
@@ -442,6 +498,11 @@ static void MSTP_Receive_Frame_FSM(void)
                     /* Preamble1 */
                     /* receive the remainder of the frame. */
                     Receive_State = MSTP_RECEIVE_STATE_PREAMBLE;
+
+                    /* if a frame-start callback was provided, call it */
+                    if (Preamble_Callback != NULL) {
+                        Preamble_Callback();
+                    }
                 }
             }
             break;
@@ -552,13 +613,27 @@ static void MSTP_Receive_Frame_FSM(void)
                                 /* NotForUs */
                                 MSTP_Flag.ReceivedValidFrameNotForUs = true;
                             }
+                            /* if a frame-receipt callback was provided, call */
+                            /* it for this frame */
+                            if (Frame_Rx_Callback != NULL) {
+                                /* convert from volatile in defined order */
+                                uint8_t source, destination, frame;
+                                source = SourceAddress;
+                                destination = DestinationAddress;
+                                frame = FrameType;
+                                Frame_Rx_Callback(source, destination, frame,
+                                    InputBuffer, DataLength);
+                            }
                             /* wait for the start of the next frame. */
                             Receive_State = MSTP_RECEIVE_STATE_IDLE;
                         } else {
                             /* receive the data portion of the frame. */
                             if ((Address == This_Station) ||
                                 (Address == MSTP_BROADCAST_ADDRESS)) {
-                                if (DataLength <= InputBufferSize) {
+                                /* convert from volatile in defined order */
+                                uint32_t length;
+                                length = DataLength;
+                                if (length <= InputBufferSize) {
                                     /* Data */
                                     Receive_State = MSTP_RECEIVE_STATE_DATA;
                                 } else {
@@ -616,13 +691,37 @@ static void MSTP_Receive_Frame_FSM(void)
                 } else if (Index == DataLength) {
                     /* CRC1 */
                     DataCRC = CRC_Calc_Data(DataRegister, DataCRC);
+                    if (Index < InputBufferSize) {
+                        InputBuffer[Index] = DataRegister;
+                    }
                     Index++;
                 } else if (Index == (DataLength + 1)) {
                     /* CRC2 */
                     DataCRC = CRC_Calc_Data(DataRegister, DataCRC);
-                    /* STATE DATA CRC - no need for new state */
-                    /* indicate the complete reception of a valid frame */
-                    if (DataCRC == 0xF0B8) {
+                    if (Index < InputBufferSize) {
+                        InputBuffer[Index] = DataRegister;
+                    }
+                    if ((FrameType >= Nmin_COBS_type) &&
+                        (FrameType <= Nmax_COBS_type)) {
+                        if (((Index+1) < InputBufferSize) &&
+                            cobs_frame_decode(
+                                &InputBuffer[Index + 1],
+                                InputBufferSize,
+                                InputBuffer, Index + 1)) {
+                            if (Receive_State ==
+                                MSTP_RECEIVE_STATE_DATA) {
+                                /* ForUs */
+                                MSTP_Flag.ReceivedValidFrame = true;
+                            } else {
+                                /* NotForUs */
+                                MSTP_Flag.ReceivedValidFrameNotForUs = true;
+                            }
+                        } else {
+                            MSTP_Flag.ReceivedInvalidFrame = true;
+                        }
+                    } else if (DataCRC == 0xF0B8) {
+                        /* STATE DATA CRC - no need for new state */
+                        /* indicate the complete reception of a valid frame */
                         if (Receive_State == MSTP_RECEIVE_STATE_DATA) {
                             /* ForUs */
                             MSTP_Flag.ReceivedValidFrame = true;
@@ -630,7 +729,17 @@ static void MSTP_Receive_Frame_FSM(void)
                             /* NotForUs */
                             MSTP_Flag.ReceivedValidFrameNotForUs = true;
                         }
-
+                        /* if a frame-receipt callback was provided, call it */
+                        /* for this frame */
+                        if (Frame_Rx_Callback != NULL) {
+                            /* convert from volatile in defined order */
+                            uint8_t source, destination, frame;
+                            source = SourceAddress;
+                            destination = DestinationAddress;
+                            frame = FrameType;
+                            Frame_Rx_Callback(source, destination, frame,
+                                InputBuffer, DataLength);
+                        }
                     } else {
                         MSTP_Flag.ReceivedInvalidFrame = true;
                     }
@@ -691,7 +800,6 @@ static void MSTP_Slave_Node_FSM(void)
                     /* a proprietary frame that expects a reply is received. */
                     pkt = (struct dlmstp_packet *)Ringbuf_Peek(&PDU_Queue);
                     if (pkt != NULL) {
-                        TransmitPDUCount++;
                         MSTP_Send_Frame(pkt->frame_type, pkt->address.mac[0],
                             This_Station, (uint8_t *)&pkt->pdu[0],
                             pkt->pdu_len);
@@ -807,6 +915,7 @@ static bool MSTP_Master_Node_FSM(void)
                 MSTP_Flag.ReceivedValidFrame = false;
                 MSTP_Flag.ReceivedInvalidFrame = false;
                 MSTP_Flag.ReceivedValidFrameNotForUs = false;
+                Statistics.lost_token_counter++;
                 Master_State = MSTP_MASTER_STATE_NO_TOKEN;
                 transition_now = true;
             } else if (MSTP_Flag.ReceivedInvalidFrame == true) {
@@ -831,20 +940,30 @@ static bool MSTP_Master_Node_FSM(void)
                         /* ReceivedPFM */
                         destination = SourceAddress;
                         source = This_Station;
-                        if (DestinationAddress == This_Station) {
+                        if (DestinationAddress == source) {
                             MSTP_Send_Frame(FRAME_TYPE_REPLY_TO_POLL_FOR_MASTER,
                                 destination, source, NULL, 0);
                         }
                         break;
                     case FRAME_TYPE_BACNET_DATA_NOT_EXPECTING_REPLY:
-                        /* indicate successful reception to the higher layers */
-                        MSTP_Flag.ReceivePacketPending = true;
+                        if ((DestinationAddress == MSTP_BROADCAST_ADDRESS) &&
+                            (npdu_confirmed_service(InputBuffer, DataLength))) {
+                            /* BTL test: verifies that the IUT will quietly
+                               discard any Confirmed-Request-PDU, whose
+                               destination address is a multicast or
+                               broadcast address, received from the
+                               network layer. */
+                        } else {
+                            /* indicate successful reception to higher layer */
+                            MSTP_Flag.ReceivePacketPending = true;
+                        }
                         break;
                     case FRAME_TYPE_BACNET_DATA_EXPECTING_REPLY:
-                        /* indicate successful reception to higher layers */
-                        MSTP_Flag.ReceivePacketPending = true;
-                        /* broadcast DER just remains IDLE */
-                        if (DestinationAddress != MSTP_BROADCAST_ADDRESS) {
+                        if (DestinationAddress == MSTP_BROADCAST_ADDRESS) {
+                            /* broadcast DER just remains IDLE */
+                        } else {
+                            /* indicate successful reception to higher layers */
+                            MSTP_Flag.ReceivePacketPending = true;
                             Master_State =
                                 MSTP_MASTER_STATE_ANSWER_DATA_REQUEST;
                         }
@@ -883,7 +1002,6 @@ static bool MSTP_Master_Node_FSM(void)
                 MSTP_Send_Frame(pkt->frame_type, pkt->address.mac[0],
                     This_Station, (uint8_t *)&pkt->pdu[0], pkt->pdu_len);
                 FrameCount++;
-                TransmitPDUCount++;
                 switch (pkt->frame_type) {
                     case FRAME_TYPE_BACNET_DATA_EXPECTING_REPLY:
                         /* SendAndWait */
@@ -1079,6 +1197,7 @@ static bool MSTP_Master_Node_FSM(void)
                     Next_Station = This_Station;
                     RetryCount = 0;
                     TokenCount = 0;
+                    Statistics.lost_token_counter++;
                     /* EventCount = 0; removed in Addendum 135-2004d-8 */
                     /* find a new successor to TS */
                     Master_State = MSTP_MASTER_STATE_POLL_FOR_MASTER;
@@ -1242,7 +1361,6 @@ static bool MSTP_Master_Node_FSM(void)
                 MSTP_Flag.ReceivedValidFrame = false;
                 /* clear the queue */
                 (void)Ringbuf_Pop(&PDU_Queue, NULL);
-                TransmitPDUCount++;
             } else if ((pkt != NULL) || timeout) {
                 /* DeferredReply */
                 /* If no reply will be available from the higher layers */
@@ -1316,7 +1434,6 @@ int dlmstp_send_pdu(BACNET_ADDRESS *dest, /* destination address */
         if (Ringbuf_Data_Put(&PDU_Queue, (volatile uint8_t *)pkt)) {
             bytes_sent = pdu_len;
         }
-        TransmitFrameCount++;
     }
 
     return bytes_sent;
@@ -1362,13 +1479,10 @@ uint16_t dlmstp_receive(
     }
     if (MSTP_Flag.ReceivedValidFrameNotForUs) {
         MSTP_Flag.ReceivedValidFrameNotForUs = false;
-        ReceiveFrameCount++;
-    }
-    if (MSTP_Flag.ReceivedValidFrame) {
-        ReceiveFrameCount++;
+        Statistics.receive_valid_frame_counter++;
     }
     if (MSTP_Flag.ReceivedInvalidFrame) {
-        ReceiveFrameCount++;
+        Statistics.receive_invalid_frame_counter++;
     }
     /* only do master state machine while rx is idle */
     if ((Receive_State == MSTP_RECEIVE_STATE_IDLE) && (transmitting == false)) {
@@ -1376,6 +1490,7 @@ uint16_t dlmstp_receive(
             MSTP_Flag.ReceivedValidFrameNotForUs = false;
         } else if (MSTP_Flag.ReceivedValidFrame) {
             if (rs485_turnaround_elapsed()) {
+                Statistics.receive_valid_frame_counter++;
                 if ((This_Station > 127) && (This_Station < 255)) {
                     MSTP_Slave_Node_FSM();
                 } else if (This_Station <= 127) {
@@ -1397,7 +1512,7 @@ uint16_t dlmstp_receive(
     /* if there is a packet that needs processed, do it now. */
     if (MSTP_Flag.ReceivePacketPending) {
         MSTP_Flag.ReceivePacketPending = false;
-        ReceivePDUCount++;
+        Statistics.receive_pdu_counter++;
         pdu_len = DataLength;
         src->mac_len = 1;
         src->mac[0] = SourceAddress;
@@ -1512,4 +1627,27 @@ uint8_t dlmstp_max_info_frames_limit(void)
 uint8_t dlmstp_max_master_limit(void)
 {
     return 127;
+}
+
+void dlmstp_set_frame_rx_complete_callback(
+    dlmstp_hook_frame_rx_complete_cb cb_func)
+{
+    Frame_Rx_Callback = cb_func;
+}
+
+void dlmstp_set_frame_rx_start_callback(dlmstp_hook_frame_rx_start_cb cb_func)
+{
+    Preamble_Callback = cb_func;
+}
+
+void dlmstp_reset_statistics(void)
+{
+    memset(&Statistics, 0, sizeof(Statistics));
+}
+
+void dlmstp_fill_statistics(struct dlmstp_statistics *statistics)
+{
+    if (statistics != NULL) {
+        memcpy(statistics, &Statistics, sizeof(Statistics));
+    }
 }

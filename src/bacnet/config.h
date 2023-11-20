@@ -37,18 +37,18 @@
    see datalink.h for possible defines. */
 #if !(defined(BACDL_ETHERNET) || defined(BACDL_ARCNET) || \
     defined(BACDL_MSTP) || defined(BACDL_BIP) || defined(BACDL_BIP6) || \
-    defined(BACDL_TEST) || defined(BACDL_ALL) || defined(BACDL_NONE))
+    defined(BACDL_TEST) || defined(BACDL_ALL) || defined(BACDL_NONE) || \
+    defined(BACDL_CUSTOM))
 #define BACDL_BIP
 #endif
 
 /* optional configuration for BACnet/IP datalink layer */
 #if (defined(BACDL_BIP) || defined(BACDL_ALL))
-/* other BIP defines (define as 1 to enable):
-    USE_INADDR - uses INADDR_BROADCAST for broadcast and binds using INADDR_ANY
-    USE_CLASSADDR = uses IN_CLASSx_HOST where x=A,B,C or D for broadcast
-*/
 #if !defined(BBMD_ENABLED)
 #define BBMD_ENABLED 1
+#endif
+#if !defined(BBMD_CLIENT_ENABLED)
+#define BBMD_CLIENT_ENABLED 1
 #endif
 #endif
 
@@ -80,7 +80,7 @@
 /* Typical sizes are 50, 128, 206, 480, 1024, and 1476 octets */
 /* This is used in constructing messages and to tell others our limits */
 /* 50 is the minimum; adjust to your memory and physical layer constraints */
-/* Lon=206, MS/TP=480, ARCNET=480, Ethernet=1476, BACnet/IP=1476 */
+/* Lon=206, MS/TP=480 or 1476, ARCNET=480, Ethernet=1476, BACnet/IP=1476 */
 #if !defined(MAX_APDU)
     /* #define MAX_APDU 50 */
     /* #define MAX_APDU 1476 */
@@ -93,6 +93,18 @@
 #elif defined (BACDL_ETHERNET)
 #if defined(BACNET_SECURITY)
 #define MAX_APDU 1420
+#else
+#define MAX_APDU 1476
+#endif
+#elif defined (BACDL_ARCNET)
+#if defined(BACNET_SECURITY)
+#define MAX_APDU 412
+#else
+#define MAX_APDU 480
+#endif
+#elif defined (BACDL_MSTP)
+#if defined(BACNET_SECURITY)
+#define MAX_APDU 412
 #else
 #define MAX_APDU 1476
 #endif
@@ -143,9 +155,8 @@
     defined(BACAPP_ENUMERATED) || \
     defined(BACAPP_DATE) || \
     defined(BACAPP_TIME) || \
-    defined(BACAPP_LIGHTING_COMMAND) || \
-    defined(BACAPP_DEVICE_OBJECT_PROP_REF) || \
-    defined(BACAPP_OBJECT_ID))
+    defined(BACAPP_OBJECT_ID) || \
+    defined(BACAPP_TYPES_EXTRA))
 #define BACAPP_ALL
 #endif
 
@@ -163,8 +174,7 @@
 #define BACAPP_DATE
 #define BACAPP_TIME
 #define BACAPP_OBJECT_ID
-#define BACAPP_DEVICE_OBJECT_PROP_REF
-#define BACAPP_LIGHTING_COMMAND
+#define BACAPP_TYPES_EXTRA
 #elif defined (BACAPP_MINIMAL)
 #define BACAPP_NULL
 #define BACAPP_BOOLEAN
@@ -172,6 +182,8 @@
 #define BACAPP_SIGNED
 #define BACAPP_REAL
 #define BACAPP_CHARACTER_STRING
+#define BACAPP_OCTET_STRING
+#define BACAPP_BIT_STRING
 #define BACAPP_ENUMERATED
 #define BACAPP_DATE
 #define BACAPP_TIME
@@ -203,15 +215,11 @@
 */
 
 /*
-** First we see if this is a test build and enable all the services as they
-** may be required.
-**
-** Note: I've left everything enabled here in the main config.h. You should
+** Note: I've left everything enabled here in the default config.h. You should
 ** use a local copy of config.h with settings configured for your needs to
-** make use of the code space reductions.
+** make use of any code space reductions in your device.
 **/
 
-#ifdef BAC_TEST
 #define BACNET_SVC_I_HAVE_A    1
 #define BACNET_SVC_WP_A        1
 #define BACNET_SVC_RP_A        1
@@ -223,19 +231,6 @@
 #define BACNET_USE_OCTETSTRING 1
 #define BACNET_USE_DOUBLE      1
 #define BACNET_USE_SIGNED      1
-#else /* Otherwise define our working set - all enabled here to avoid breaking things */
-#define BACNET_SVC_I_HAVE_A    1
-#define BACNET_SVC_WP_A        1
-#define BACNET_SVC_RP_A        1
-#define BACNET_SVC_RPM_A       1
-#define BACNET_SVC_DCC_A       1
-#define BACNET_SVC_RD_A        1
-#define BACNET_SVC_TS_A        1
-#define BACNET_SVC_SERVER      0
-#define BACNET_USE_OCTETSTRING 1
-#define BACNET_USE_DOUBLE      1
-#define BACNET_USE_SIGNED      1
-#endif
 
 /* Do them one by one */
 #ifndef BACNET_SVC_I_HAVE_A     /* Do we send I_Have requests? */

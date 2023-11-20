@@ -39,220 +39,151 @@
 
 /** @file bacerror.c  Encode/Decode BACnet Errors */
 
-/* encode service */
+/**
+ * @brief Encodes BACnet Error class and code values into a PDU
+ *  From clause 21. FORMAL DESCRIPTION OF APPLICATION PROTOCOL DATA UNITS
+ * 
+ *      Error ::= SEQUENCE {
+ *          -- NOTE: The valid combinations of error-class and error-code 
+ *          -- are defined in Clause 18.
+ *          error-class ENUMERATED,
+ *          error-code ENUMERATED
+ *      }
+ * 
+ * @param apdu - buffer for the data to be encoded, or NULL for length
+ * @param invoke_id - invokeID to be encoded
+ * @param service - BACnet service to be encoded
+ * @param error_class - #BACNET_ERROR_CLASS value to be encoded
+ * @param error_code - #BACNET_ERROR_CODE value to be encoded
+ * @return number of bytes encoded
+ */
 int bacerror_encode_apdu(uint8_t *apdu,
     uint8_t invoke_id,
     BACNET_CONFIRMED_SERVICE service,
     BACNET_ERROR_CLASS error_class,
     BACNET_ERROR_CODE error_code)
 {
-    int apdu_len = 0; /* total length of the apdu, return value */
+    /* length of the specific element of the PDU */
+    int len = 0;
+    /* total length of the apdu, return value */
+    int apdu_len = 0; 
 
     if (apdu) {
         apdu[0] = PDU_TYPE_ERROR;
         apdu[1] = invoke_id;
         apdu[2] = service;
-        apdu_len = 3;
-        /* service parameters */
-        apdu_len += encode_application_enumerated(&apdu[apdu_len], error_class);
-        apdu_len += encode_application_enumerated(&apdu[apdu_len], error_code);
     }
+    len = 3;
+    apdu_len = len;
+    if (apdu) {
+        apdu += len;
+    }
+    /* service parameters */
+    len = encode_application_enumerated(apdu, error_class);
+    apdu_len += len;
+    if (apdu) {
+        apdu += len;
+    }
+    len = encode_application_enumerated(apdu, error_code);
+    apdu_len += len;
 
     return apdu_len;
 }
 
 #if !BACNET_SVC_SERVER
-/* decode the application class and code */
+/**
+ * @brief Decodes from bytes a BACnet Error service APDU
+ *  From clause 21. FORMAL DESCRIPTION OF APPLICATION PROTOCOL DATA UNITS
+ * 
+ *  Error ::= SEQUENCE {
+ *      -- NOTE: The valid combinations of error-class and error-code 
+ *      -- are defined in Clause 18.
+ *      error-class ENUMERATED,
+ *      error-code ENUMERATED
+ *  }
+ *
+ * @param apdu - buffer of data to be decoded
+ * @param apdu_size - number of bytes in the buffer
+ * @param error_class - decoded #BACNET_ERROR_CLASS value
+ * @param error_code - decoded #BACNET_ERROR_CODE value
+ *
+ * @return number of bytes decoded, or #BACNET_STATUS_ERROR (-1) if malformed
+ */
 int bacerror_decode_error_class_and_code(uint8_t *apdu,
-    unsigned apdu_len,
+    unsigned apdu_size,
     BACNET_ERROR_CLASS *error_class,
     BACNET_ERROR_CODE *error_code)
 {
-    int len = 0;
-    uint8_t tag_number = 0;
-    uint32_t len_value_type = 0;
+    int apdu_len = 0;
+    int tag_len = 0;
     uint32_t decoded_value = 0;
 
-    if (apdu_len) {
+    if (apdu) {
         /* error class */
-        len += decode_tag_number_and_value(
-            &apdu[len], &tag_number, &len_value_type);
-        if (tag_number != BACNET_APPLICATION_TAG_ENUMERATED) {
-            return 0;
+        tag_len = bacnet_enumerated_application_decode(
+            &apdu[apdu_len], apdu_size-apdu_len, &decoded_value);
+        if (tag_len <= 0) {
+            return BACNET_STATUS_ERROR;
         }
-        len += decode_enumerated(&apdu[len], len_value_type, &decoded_value);
         if (error_class) {
             *error_class = (BACNET_ERROR_CLASS)decoded_value;
         }
+        apdu_len += tag_len;
         /* error code */
-        len += decode_tag_number_and_value(
-            &apdu[len], &tag_number, &len_value_type);
-        if (tag_number != BACNET_APPLICATION_TAG_ENUMERATED) {
-            return 0;
+        tag_len = bacnet_enumerated_application_decode(
+            &apdu[apdu_len], apdu_size - apdu_len, &decoded_value);
+        if (tag_len <= 0) {
+            return BACNET_STATUS_ERROR;
         }
-        len += decode_enumerated(&apdu[len], len_value_type, &decoded_value);
         if (error_code) {
             *error_code = (BACNET_ERROR_CODE)decoded_value;
         }
+        apdu_len += tag_len;
     }
 
-    return len;
+    return apdu_len;
 }
 
-/* decode the service request only */
+/**
+ * @brief Decodes from bytes a BACnet Error service
+ * @param apdu - buffer of data to be decoded
+ * @param apdu_size - number of bytes in the buffer
+ * @param invoke_id - decoded invokeID
+ * @param service - decoded BACnet service
+ * @param error_class - decoded #BACNET_ERROR_CLASS value
+ * @param error_code - decoded #BACNET_ERROR_CODE value
+ *
+ * @return number of bytes decoded, or #BACNET_STATUS_ERROR (-1) if malformed
+ */
 int bacerror_decode_service_request(uint8_t *apdu,
-    unsigned apdu_len,
+    unsigned apdu_size,
     uint8_t *invoke_id,
     BACNET_CONFIRMED_SERVICE *service,
     BACNET_ERROR_CLASS *error_class,
     BACNET_ERROR_CODE *error_code)
 {
+    int apdu_len = BACNET_STATUS_ERROR;
     int len = 0;
 
-    if (apdu_len > 2) {
+    if (apdu && (apdu_size > 2)) {
         if (invoke_id) {
             *invoke_id = apdu[0];
         }
         if (service) {
             *service = (BACNET_CONFIRMED_SERVICE)apdu[1];
         }
+        len = 2;
+        apdu_len = len;
         /* decode the application class and code */
         len = bacerror_decode_error_class_and_code(
-            &apdu[2], apdu_len - 2, error_class, error_code);
+            &apdu[apdu_len], apdu_size - apdu_len, error_class, error_code);
+        if (len > 0) {
+            apdu_len += len;
+        } else {
+            apdu_len = BACNET_STATUS_ERROR;
+        }
     }
 
-    return len;
+    return apdu_len;
 }
 #endif
-
-#ifdef BAC_TEST
-#include <assert.h>
-#include <string.h>
-#include "ctest.h"
-
-/* decode the whole APDU - mainly used for unit testing */
-int bacerror_decode_apdu(uint8_t *apdu,
-    unsigned apdu_len,
-    uint8_t *invoke_id,
-    BACNET_CONFIRMED_SERVICE *service,
-    BACNET_ERROR_CLASS *error_class,
-    BACNET_ERROR_CODE *error_code)
-{
-    int len = 0;
-
-    if (!apdu)
-        return -1;
-    /* optional checking - most likely was already done prior to this call */
-    if (apdu_len) {
-        if (apdu[0] != PDU_TYPE_ERROR)
-            return -1;
-        if (apdu_len > 1) {
-            len = bacerror_decode_service_request(&apdu[1], apdu_len - 1,
-                invoke_id, service, error_class, error_code);
-        }
-    }
-
-    return len;
-}
-
-void testBACError(Test *pTest)
-{
-    uint8_t apdu[480] = { 0 };
-    int len = 0;
-    int apdu_len = 0;
-    uint8_t invoke_id = 0;
-    BACNET_CONFIRMED_SERVICE service = 0;
-    BACNET_ERROR_CLASS error_class = 0;
-    BACNET_ERROR_CODE error_code = 0;
-    uint8_t test_invoke_id = 0;
-    BACNET_CONFIRMED_SERVICE test_service = 0;
-    BACNET_ERROR_CLASS test_error_class = 0;
-    BACNET_ERROR_CODE test_error_code = 0;
-
-    len = bacerror_encode_apdu(
-        &apdu[0], invoke_id, service, error_class, error_code);
-    ct_test(pTest, len != 0);
-    apdu_len = len;
-
-    len = bacerror_decode_apdu(&apdu[0], apdu_len, &test_invoke_id,
-        &test_service, &test_error_class, &test_error_code);
-    ct_test(pTest, len != -1);
-    ct_test(pTest, test_invoke_id == invoke_id);
-    ct_test(pTest, test_service == service);
-    ct_test(pTest, test_error_class == error_class);
-    ct_test(pTest, test_error_code == error_code);
-
-    /* change type to get negative response */
-    apdu[0] = PDU_TYPE_ABORT;
-    len = bacerror_decode_apdu(&apdu[0], apdu_len, &test_invoke_id,
-        &test_service, &test_error_class, &test_error_code);
-    ct_test(pTest, len == -1);
-
-    /* test NULL APDU */
-    len = bacerror_decode_apdu(NULL, apdu_len, &test_invoke_id, &test_service,
-        &test_error_class, &test_error_code);
-    ct_test(pTest, len == -1);
-
-    /* force a zero length */
-    len = bacerror_decode_apdu(&apdu[0], 0, &test_invoke_id, &test_service,
-        &test_error_class, &test_error_code);
-    ct_test(pTest, len == 0);
-
-    /* check them all...   */
-    for (service = 0; service < MAX_BACNET_CONFIRMED_SERVICE; service++) {
-        for (error_class = 0; error_class < ERROR_CLASS_PROPRIETARY_FIRST;
-             error_class++) {
-            for (error_code = 0; error_code < ERROR_CODE_PROPRIETARY_FIRST;
-                 error_code++) {
-                len = bacerror_encode_apdu(
-                    &apdu[0], invoke_id, service, error_class, error_code);
-                apdu_len = len;
-                ct_test(pTest, len != 0);
-                len = bacerror_decode_apdu(&apdu[0], apdu_len, &test_invoke_id,
-                    &test_service, &test_error_class, &test_error_code);
-                ct_test(pTest, len != -1);
-                ct_test(pTest, test_invoke_id == invoke_id);
-                ct_test(pTest, test_service == service);
-                ct_test(pTest, test_error_class == error_class);
-                ct_test(pTest, test_error_code == error_code);
-            }
-        }
-    }
-
-    /* max boundaries */
-    service = 255;
-    error_class = ERROR_CLASS_PROPRIETARY_LAST;
-    error_code = ERROR_CODE_PROPRIETARY_LAST;
-    len = bacerror_encode_apdu(
-        &apdu[0], invoke_id, service, error_class, error_code);
-    apdu_len = len;
-    ct_test(pTest, len != 0);
-    len = bacerror_decode_apdu(&apdu[0], apdu_len, &test_invoke_id,
-        &test_service, &test_error_class, &test_error_code);
-    ct_test(pTest, len != -1);
-    ct_test(pTest, test_invoke_id == invoke_id);
-    ct_test(pTest, test_service == service);
-    ct_test(pTest, test_error_class == error_class);
-    ct_test(pTest, test_error_code == error_code);
-}
-
-#ifdef TEST_BACERROR
-int main(void)
-{
-    Test *pTest;
-    bool rc;
-
-    pTest = ct_create("BACnet Error", NULL);
-    /* individual tests */
-    rc = ct_addTestFunction(pTest, testBACError);
-    assert(rc);
-
-    ct_setStream(pTest, stdout);
-    ct_run(pTest);
-    (void)ct_report(pTest);
-    ct_destroy(pTest);
-
-    return 0;
-}
-#endif /* TEST_ERROR */
-#endif /* BAC_TEST */

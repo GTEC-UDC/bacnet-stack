@@ -679,15 +679,14 @@ void datetime_add_minutes(BACNET_DATE_TIME *bdatetime, int32_t minutes)
     datetime_days_since_epoch_into_date(bdatetime_days, &bdatetime->date);
 }
 
-#ifdef UINT64_MAX
 /**
- * @brief Calculates the number of seconds since epoch
+ * @brief Calculates the number of seconds since epoch from datetime
  * @param bdatetime [in] the starting date and time
- * @return seconds since midnight
+ * @return seconds since epoch
  */
-uint64_t datetime_seconds_since_epoch(BACNET_DATE_TIME *bdatetime)
+bacnet_time_t datetime_seconds_since_epoch(BACNET_DATE_TIME *bdatetime)
 {
-    uint64_t seconds = 0;
+    bacnet_time_t seconds = 0;
     uint32_t days = 0;
 
     if (bdatetime) {
@@ -699,15 +698,14 @@ uint64_t datetime_seconds_since_epoch(BACNET_DATE_TIME *bdatetime)
 
     return seconds;
 }
-#endif
 
-#ifdef UINT64_MAX
 /**
- * @brief Calculates the number of seconds since epoch
- * @param bdatetime [in] the starting date and time
- * @return seconds since midnight
+ * @brief Calculates the datetime from number of seconds since epoch
+ * @param bdatetime [out] the starting date and time
+ * @param seconds since epoch
  */
-void datetime_since_epoch_seconds(BACNET_DATE_TIME *bdatetime, uint64_t seconds)
+void datetime_since_epoch_seconds(
+    BACNET_DATE_TIME *bdatetime, bacnet_time_t seconds)
 {
     uint32_t seconds_after_midnight = 0;
     uint32_t days = 0;
@@ -722,7 +720,20 @@ void datetime_since_epoch_seconds(BACNET_DATE_TIME *bdatetime, uint64_t seconds)
         datetime_days_since_epoch_into_date(days, &bdatetime->date);
     }
 }
+
+/**
+ * @brief Calculates the number of seconds since epoch
+ * @param bdatetime [in] the starting date and time
+ * @return maximum number of seconds since epoch
+ */
+bacnet_time_t datetime_seconds_since_epoch_max(void)
+{
+#ifdef UINT64_MAX
+    return UINT64_MAX;
+#else
+    return UINT32_MAX;
 #endif
+}
 
 /* Returns true if year is a wildcard */
 bool datetime_wildcard_year(BACNET_DATE *bdate)
@@ -1032,85 +1043,149 @@ bool datetime_local_to_utc(BACNET_DATE_TIME *utc_time,
     return status;
 }
 
+/**
+ * @brief Encode a BACnetDateTime complex data type
+ *  From clause 21. FORMAL DESCRIPTION OF APPLICATION PROTOCOL DATA UNITS
+ *
+ *  BACnetDateTime ::= SEQUENCE {
+ *      date Date, -- see Clause 20.2.12 for restrictions
+ *      time Time -- see Clause 20.2.13 for restrictions
+ *  }
+ *
+ * @param apdu  buffer to be encoded, or NULL for length
+ * @param value The value to be encoded.
+ * @return the number of apdu bytes encoded
+ */
 int bacapp_encode_datetime(uint8_t *apdu, BACNET_DATE_TIME *value)
 {
     int len = 0;
     int apdu_len = 0;
 
-    if (apdu && value) {
-        len = encode_application_date(&apdu[0], &value->date);
+    if (value) {
+        len = encode_application_date(apdu, &value->date);
+        if (apdu) {
+            apdu += len;
+        }
         apdu_len += len;
-
-        len = encode_application_time(&apdu[apdu_len], &value->time);
+        len = encode_application_time(apdu, &value->time);
         apdu_len += len;
     }
+
     return apdu_len;
 }
 
+/**
+ * @brief Encode a context tagged BACnetDateTime complex data type
+ * @param apdu  buffer to be encoded, or NULL for length
+ * @param tag_number - context tag number to be encoded
+ * @param value The value to be encoded.
+ * @return the number of apdu bytes encoded
+ */
 int bacapp_encode_context_datetime(
     uint8_t *apdu, uint8_t tag_number, BACNET_DATE_TIME *value)
 {
     int len = 0;
     int apdu_len = 0;
 
-    if (apdu && value) {
-        len = encode_opening_tag(&apdu[apdu_len], tag_number);
+    if (value) {
+        len = encode_opening_tag(apdu, tag_number);
         apdu_len += len;
-
-        len = bacapp_encode_datetime(&apdu[apdu_len], value);
+        if (apdu) {
+            apdu += len;
+        }
+        len = bacapp_encode_datetime(apdu, value);
         apdu_len += len;
-
-        len = encode_closing_tag(&apdu[apdu_len], tag_number);
+        if (apdu) {
+            apdu += len;
+        }
+        len = encode_closing_tag(apdu, tag_number);
         apdu_len += len;
     }
+
+    return apdu_len;
+}
+
+/**
+ * @brief Decodes a BACnetDateTime value from APDU buffer
+ * @param apdu - the APDU buffer
+ * @param apdu_size - the APDU buffer size
+ * @param value - parameter to store the value after decoding
+ * @return length of the APDU buffer decoded, or BACNET_STATUS_ERROR
+ */
+int bacnet_datetime_decode(
+    uint8_t *apdu, uint32_t apdu_size, BACNET_DATE_TIME *value)
+{
+    int len = 0;
+    int apdu_len = 0;
+    BACNET_DATE *bdate = NULL;
+    BACNET_TIME *btime = NULL;
+
+    if (value) {
+        bdate = &value->date;
+    }
+    len = bacnet_date_application_decode(
+        &apdu[apdu_len], apdu_size - apdu_len, bdate);
+    if (len <= 0) {
+        return BACNET_STATUS_ERROR;
+    }
+    apdu_len += len;
+    if (value) {
+        btime = &value->time;
+    }
+    len = bacnet_time_application_decode(
+        &apdu[apdu_len], apdu_size - apdu_len, btime);
+    if (len <= 0) {
+        return BACNET_STATUS_ERROR;
+    }
+    apdu_len += len;
+
     return apdu_len;
 }
 
 int bacapp_decode_datetime(uint8_t *apdu, BACNET_DATE_TIME *value)
 {
-    int len = 0;
-    int section_len;
+    return bacnet_datetime_decode(apdu, MAX_APDU, value);
+}
 
-    if (-1 ==
-        (section_len = decode_application_date(&apdu[len], &value->date))) {
-        return -1;
+/**
+ * @brief Decodes a context tagged BACnetDateTime value from APDU buffer
+ * @param apdu - the APDU buffer
+ * @param apdu_size - the APDU buffer size
+ * @param tag_number - context tag number to be encoded
+ * @param value - parameter to store the value after decoding
+ * @return length of the APDU buffer decoded, or BACNET_STATUS_ERROR
+ */
+int bacnet_datetime_context_decode(uint8_t *apdu,
+    uint32_t apdu_size,
+    uint8_t tag_number,
+    BACNET_DATE_TIME *value)
+{
+    int apdu_len = 0;
+    int len;
+
+    if (!bacnet_is_opening_tag_number(
+            &apdu[apdu_len], apdu_size - apdu_len, tag_number, &len)) {
+        return BACNET_STATUS_ERROR;
     }
-    len += section_len;
-
-    if (-1 ==
-        (section_len = decode_application_time(&apdu[len], &value->time))) {
-        return -1;
+    apdu_len += len;
+    len = bacnet_datetime_decode(&apdu[apdu_len], apdu_size - apdu_len, value);
+    if (len < 0) {
+        return BACNET_STATUS_ERROR;
     }
+    apdu_len += len;
+    if (!bacnet_is_closing_tag_number(
+            &apdu[apdu_len], apdu_size - apdu_len, tag_number, &len)) {
+        return BACNET_STATUS_ERROR;
+    }
+    apdu_len += len;
 
-    len += section_len;
-
-    return len;
+    return apdu_len;
 }
 
 int bacapp_decode_context_datetime(
     uint8_t *apdu, uint8_t tag_number, BACNET_DATE_TIME *value)
 {
-    int apdu_len = 0;
-    int len;
-
-    if (decode_is_opening_tag_number(&apdu[apdu_len], tag_number)) {
-        apdu_len++;
-    } else {
-        return -1;
-    }
-
-    if (-1 == (len = bacapp_decode_datetime(&apdu[apdu_len], value))) {
-        return -1;
-    } else {
-        apdu_len += len;
-    }
-
-    if (decode_is_closing_tag_number(&apdu[apdu_len], tag_number)) {
-        apdu_len++;
-    } else {
-        return -1;
-    }
-    return apdu_len;
+    return bacnet_datetime_context_decode(apdu, MAX_APDU, tag_number, value);
 }
 
 /**
@@ -1177,564 +1252,3 @@ bool datetime_time_init_ascii(BACNET_TIME *btime, const char *ascii)
 
     return status;
 }
-
-#ifdef BAC_TEST
-#include <assert.h>
-#include <string.h>
-#include "ctest.h"
-
-static void datetime_print(const char *title, BACNET_DATE_TIME *bdatetime)
-{
-    printf("%s: %04u/%02u/%02u %02u:%02u:%02u.%03u\n", title,
-        (unsigned int)bdatetime->date.year, (unsigned int)bdatetime->date.month,
-        (unsigned int)bdatetime->date.wday, (unsigned int)bdatetime->time.hour,
-        (unsigned int)bdatetime->time.min, (unsigned int)bdatetime->time.sec,
-        (unsigned int)bdatetime->time.hundredths);
-}
-
-static void testBACnetDateTimeWildcard(Test *pTest)
-{
-    BACNET_DATE_TIME bdatetime;
-    bool status = false;
-
-    datetime_set_values(&bdatetime, BACNET_DATE_YEAR_EPOCH, 1, 1, 0, 0, 0, 0);
-    status = datetime_wildcard(&bdatetime);
-    ct_test(pTest, status == false);
-
-    datetime_wildcard_set(&bdatetime);
-    status = datetime_wildcard(&bdatetime);
-    ct_test(pTest, status == true);
-}
-
-static void testBACnetDateTimeAdd(Test *pTest)
-{
-    BACNET_DATE_TIME bdatetime, test_bdatetime;
-    uint32_t minutes = 0;
-    int diff = 0;
-
-    datetime_set_values(&bdatetime, BACNET_DATE_YEAR_EPOCH, 1, 1, 0, 0, 0, 0);
-    datetime_copy(&test_bdatetime, &bdatetime);
-    datetime_add_minutes(&bdatetime, minutes);
-    diff = datetime_compare(&test_bdatetime, &bdatetime);
-    ct_test(pTest, diff == 0);
-
-    datetime_set_values(&bdatetime, BACNET_DATE_YEAR_EPOCH, 1, 1, 0, 0, 0, 0);
-    datetime_add_minutes(&bdatetime, 60);
-    datetime_set_values(
-        &test_bdatetime, BACNET_DATE_YEAR_EPOCH, 1, 1, 1, 0, 0, 0);
-    diff = datetime_compare(&test_bdatetime, &bdatetime);
-    ct_test(pTest, diff == 0);
-
-    datetime_set_values(&bdatetime, BACNET_DATE_YEAR_EPOCH, 1, 1, 0, 0, 0, 0);
-    datetime_add_minutes(&bdatetime, (24 * 60));
-    datetime_set_values(
-        &test_bdatetime, BACNET_DATE_YEAR_EPOCH, 1, 2, 0, 0, 0, 0);
-    diff = datetime_compare(&test_bdatetime, &bdatetime);
-    ct_test(pTest, diff == 0);
-
-    datetime_set_values(&bdatetime, BACNET_DATE_YEAR_EPOCH, 1, 1, 0, 0, 0, 0);
-    datetime_add_minutes(&bdatetime, (31 * 24 * 60));
-    datetime_set_values(
-        &test_bdatetime, BACNET_DATE_YEAR_EPOCH, 2, 1, 0, 0, 0, 0);
-    diff = datetime_compare(&test_bdatetime, &bdatetime);
-    ct_test(pTest, diff == 0);
-
-    datetime_set_values(&bdatetime, 2013, 6, 6, 23, 59, 59, 0);
-    datetime_add_minutes(&bdatetime, 60);
-    datetime_set_values(&test_bdatetime, 2013, 6, 7, 0, 59, 59, 0);
-    diff = datetime_compare(&test_bdatetime, &bdatetime);
-    ct_test(pTest, diff == 0);
-
-    datetime_set_values(&bdatetime, 2013, 6, 6, 0, 59, 59, 0);
-    datetime_add_minutes(&bdatetime, -60);
-    datetime_set_values(&test_bdatetime, 2013, 6, 5, 23, 59, 59, 0);
-    diff = datetime_compare(&test_bdatetime, &bdatetime);
-    ct_test(pTest, diff == 0);
-}
-
-static void testBACnetDateTimeSeconds(Test *pTest)
-{
-    uint8_t hour = 0, minute = 0, second = 0;
-    uint8_t test_hour = 0, test_minute = 0, test_second = 0;
-    uint32_t seconds = 0, test_seconds;
-
-    for (hour = 0; hour < 24; hour++) {
-        for (minute = 0; minute < 60; minute += 3) {
-            for (second = 0; second < 60; second += 17) {
-                seconds = datetime_hms_to_seconds_since_midnight(
-                    hour, minute, second);
-                datetime_hms_from_seconds_since_midnight(
-                    seconds, &test_hour, &test_minute, &test_second);
-                test_seconds = datetime_hms_to_seconds_since_midnight(
-                    test_hour, test_minute, test_second);
-                ct_test(pTest, seconds == test_seconds);
-            }
-        }
-    }
-}
-
-static void testBACnetDate(Test *pTest)
-{
-    BACNET_DATE bdate1, bdate2;
-    int diff = 0;
-
-    datetime_set_date(&bdate1, BACNET_DATE_YEAR_EPOCH, 1, 1);
-    datetime_copy_date(&bdate2, &bdate1);
-    diff = datetime_compare_date(&bdate1, &bdate2);
-    ct_test(pTest, diff == 0);
-    datetime_set_date(&bdate2, BACNET_DATE_YEAR_EPOCH, 1, 2);
-    diff = datetime_compare_date(&bdate1, &bdate2);
-    ct_test(pTest, diff < 0);
-    datetime_set_date(&bdate2, BACNET_DATE_YEAR_EPOCH, 2, 1);
-    diff = datetime_compare_date(&bdate1, &bdate2);
-    ct_test(pTest, diff < 0);
-    datetime_set_date(&bdate2, 1901, 1, 1);
-    diff = datetime_compare_date(&bdate1, &bdate2);
-    ct_test(pTest, diff < 0);
-
-    /* midpoint */
-    datetime_set_date(&bdate1, 2007, 7, 15);
-    datetime_copy_date(&bdate2, &bdate1);
-    diff = datetime_compare_date(&bdate1, &bdate2);
-    ct_test(pTest, diff == 0);
-    datetime_set_date(&bdate2, 2007, 7, 14);
-    diff = datetime_compare_date(&bdate1, &bdate2);
-    ct_test(pTest, diff > 0);
-    datetime_set_date(&bdate2, 2007, 7, 1);
-    diff = datetime_compare_date(&bdate1, &bdate2);
-    ct_test(pTest, diff > 0);
-    datetime_set_date(&bdate2, 2007, 7, 31);
-    diff = datetime_compare_date(&bdate1, &bdate2);
-    ct_test(pTest, diff < 0);
-    datetime_set_date(&bdate2, 2007, 8, 15);
-    diff = datetime_compare_date(&bdate1, &bdate2);
-    ct_test(pTest, diff < 0);
-    datetime_set_date(&bdate2, 2007, 12, 15);
-    diff = datetime_compare_date(&bdate1, &bdate2);
-    ct_test(pTest, diff < 0);
-    datetime_set_date(&bdate2, 2007, 6, 15);
-    diff = datetime_compare_date(&bdate1, &bdate2);
-    ct_test(pTest, diff > 0);
-    datetime_set_date(&bdate2, 2007, 1, 15);
-    diff = datetime_compare_date(&bdate1, &bdate2);
-    ct_test(pTest, diff > 0);
-    datetime_set_date(&bdate2, 2006, 7, 15);
-    diff = datetime_compare_date(&bdate1, &bdate2);
-    ct_test(pTest, diff > 0);
-    datetime_set_date(&bdate2, BACNET_DATE_YEAR_EPOCH, 7, 15);
-    diff = datetime_compare_date(&bdate1, &bdate2);
-    ct_test(pTest, diff > 0);
-    datetime_set_date(&bdate2, 2008, 7, 15);
-    diff = datetime_compare_date(&bdate1, &bdate2);
-    ct_test(pTest, diff < 0);
-    datetime_set_date(&bdate2, 2154, 7, 15);
-    diff = datetime_compare_date(&bdate1, &bdate2);
-    ct_test(pTest, diff < 0);
-
-    return;
-}
-
-static void testBACnetTime(Test *pTest)
-{
-    BACNET_TIME btime1, btime2;
-    int diff = 0;
-
-    datetime_set_time(&btime1, 0, 0, 0, 0);
-    datetime_copy_time(&btime2, &btime1);
-    diff = datetime_compare_time(&btime1, &btime2);
-    ct_test(pTest, diff == 0);
-
-    datetime_set_time(&btime1, 23, 59, 59, 99);
-    datetime_copy_time(&btime2, &btime1);
-    diff = datetime_compare_time(&btime1, &btime2);
-    ct_test(pTest, diff == 0);
-
-    /* midpoint */
-    datetime_set_time(&btime1, 12, 30, 30, 50);
-    datetime_copy_time(&btime2, &btime1);
-    diff = datetime_compare_time(&btime1, &btime2);
-    ct_test(pTest, diff == 0);
-    datetime_set_time(&btime2, 12, 30, 30, 51);
-    diff = datetime_compare_time(&btime1, &btime2);
-    ct_test(pTest, diff < 0);
-    datetime_set_time(&btime2, 12, 30, 31, 50);
-    diff = datetime_compare_time(&btime1, &btime2);
-    ct_test(pTest, diff < 0);
-    datetime_set_time(&btime2, 12, 31, 30, 50);
-    diff = datetime_compare_time(&btime1, &btime2);
-    ct_test(pTest, diff < 0);
-    datetime_set_time(&btime2, 13, 30, 30, 50);
-    diff = datetime_compare_time(&btime1, &btime2);
-    ct_test(pTest, diff < 0);
-
-    datetime_set_time(&btime2, 12, 30, 30, 49);
-    diff = datetime_compare_time(&btime1, &btime2);
-    ct_test(pTest, diff > 0);
-    datetime_set_time(&btime2, 12, 30, 29, 50);
-    diff = datetime_compare_time(&btime1, &btime2);
-    ct_test(pTest, diff > 0);
-    datetime_set_time(&btime2, 12, 29, 30, 50);
-    diff = datetime_compare_time(&btime1, &btime2);
-    ct_test(pTest, diff > 0);
-    datetime_set_time(&btime2, 11, 30, 30, 50);
-    diff = datetime_compare_time(&btime1, &btime2);
-    ct_test(pTest, diff > 0);
-
-    return;
-}
-
-static void testBACnetDateTime(Test *pTest)
-{
-    BACNET_DATE_TIME bdatetime1, bdatetime2;
-    BACNET_DATE bdate;
-    BACNET_TIME btime;
-    int diff = 0;
-
-    datetime_set_values(&bdatetime1, BACNET_DATE_YEAR_EPOCH, 1, 1, 0, 0, 0, 0);
-    datetime_copy(&bdatetime2, &bdatetime1);
-    diff = datetime_compare(&bdatetime1, &bdatetime2);
-    ct_test(pTest, diff == 0);
-    datetime_set_time(&btime, 0, 0, 0, 0);
-    datetime_set_date(&bdate, BACNET_DATE_YEAR_EPOCH, 1, 1);
-    datetime_set(&bdatetime1, &bdate, &btime);
-    diff = datetime_compare(&bdatetime1, &bdatetime2);
-    ct_test(pTest, diff == 0);
-
-    /* midpoint */
-    /* if datetime1 is before datetime2, returns negative */
-    datetime_set_values(&bdatetime1, 2000, 7, 15, 12, 30, 30, 50);
-    datetime_set_values(&bdatetime2, 2000, 7, 15, 12, 30, 30, 51);
-    diff = datetime_compare(&bdatetime1, &bdatetime2);
-    ct_test(pTest, diff < 0);
-    datetime_set_values(&bdatetime2, 2000, 7, 15, 12, 30, 31, 50);
-    diff = datetime_compare(&bdatetime1, &bdatetime2);
-    ct_test(pTest, diff < 0);
-    datetime_set_values(&bdatetime2, 2000, 7, 15, 12, 31, 30, 50);
-    diff = datetime_compare(&bdatetime1, &bdatetime2);
-    ct_test(pTest, diff < 0);
-    datetime_set_values(&bdatetime2, 2000, 7, 15, 13, 30, 30, 50);
-    diff = datetime_compare(&bdatetime1, &bdatetime2);
-    ct_test(pTest, diff < 0);
-    datetime_set_values(&bdatetime2, 2000, 7, 16, 12, 30, 30, 50);
-    diff = datetime_compare(&bdatetime1, &bdatetime2);
-    ct_test(pTest, diff < 0);
-    datetime_set_values(&bdatetime2, 2000, 8, 15, 12, 30, 30, 50);
-    diff = datetime_compare(&bdatetime1, &bdatetime2);
-    ct_test(pTest, diff < 0);
-    datetime_set_values(&bdatetime2, 2001, 7, 15, 12, 30, 30, 50);
-    diff = datetime_compare(&bdatetime1, &bdatetime2);
-    ct_test(pTest, diff < 0);
-    datetime_set_values(&bdatetime2, 2000, 7, 15, 12, 30, 30, 49);
-    diff = datetime_compare(&bdatetime1, &bdatetime2);
-    ct_test(pTest, diff > 0);
-    datetime_set_values(&bdatetime2, 2000, 7, 15, 12, 30, 29, 50);
-    diff = datetime_compare(&bdatetime1, &bdatetime2);
-    ct_test(pTest, diff > 0);
-    datetime_set_values(&bdatetime2, 2000, 7, 15, 12, 29, 30, 50);
-    diff = datetime_compare(&bdatetime1, &bdatetime2);
-    ct_test(pTest, diff > 0);
-    datetime_set_values(&bdatetime2, 2000, 7, 15, 11, 30, 30, 50);
-    diff = datetime_compare(&bdatetime1, &bdatetime2);
-    ct_test(pTest, diff > 0);
-    datetime_set_values(&bdatetime2, 2000, 7, 14, 12, 30, 30, 50);
-    diff = datetime_compare(&bdatetime1, &bdatetime2);
-    ct_test(pTest, diff > 0);
-    datetime_set_values(&bdatetime2, 2000, 6, 15, 12, 30, 30, 50);
-    diff = datetime_compare(&bdatetime1, &bdatetime2);
-    ct_test(pTest, diff > 0);
-    datetime_set_values(&bdatetime2, 1999, 7, 15, 12, 30, 30, 50);
-    diff = datetime_compare(&bdatetime1, &bdatetime2);
-    ct_test(pTest, diff > 0);
-
-    return;
-}
-
-static void testWildcardDateTime(Test *pTest)
-{
-    BACNET_DATE_TIME bdatetime1, bdatetime2;
-    BACNET_DATE bdate;
-    BACNET_TIME btime;
-    int diff = 0;
-
-    datetime_wildcard_set(&bdatetime1);
-    ct_test(pTest, datetime_wildcard(&bdatetime1));
-    ct_test(pTest, datetime_wildcard_present(&bdatetime1));
-    datetime_copy(&bdatetime2, &bdatetime1);
-    diff = datetime_wildcard_compare(&bdatetime1, &bdatetime2);
-    ct_test(pTest, diff == 0);
-    datetime_time_wildcard_set(&btime);
-    datetime_date_wildcard_set(&bdate);
-    datetime_set(&bdatetime1, &bdate, &btime);
-    diff = datetime_wildcard_compare(&bdatetime1, &bdatetime2);
-    ct_test(pTest, diff == 0);
-
-    return;
-}
-
-static void testDayOfYear(Test *pTest)
-{
-    uint32_t days = 0;
-    uint8_t month = 0, test_month = 0;
-    uint8_t day = 0, test_day = 0;
-    uint16_t year = 0;
-    BACNET_DATE bdate;
-    BACNET_DATE test_bdate;
-
-    days = datetime_ymd_day_of_year(1900, 1, 1);
-    ct_test(pTest, days == 1);
-    days_of_year_to_month_day(days, 1900, &month, &day);
-    ct_test(pTest, month == 1);
-    ct_test(pTest, day == 1);
-
-    for (year = 1900; year <= 2154; year++) {
-        for (month = 1; month <= 12; month++) {
-            for (day = 1; day <= days_per_month(year, month); day++) {
-                days = datetime_ymd_day_of_year(year, month, day);
-                days_of_year_to_month_day(days, year, &test_month, &test_day);
-                ct_test(pTest, month == test_month);
-                ct_test(pTest, day == test_day);
-            }
-        }
-    }
-    for (year = 1900; year <= 2154; year++) {
-        for (month = 1; month <= 12; month++) {
-            for (day = 1; day <= days_per_month(year, month); day++) {
-                datetime_set_date(&bdate, year, month, day);
-                days = datetime_day_of_year(&bdate);
-                datetime_day_of_year_into_date(days, year, &test_bdate);
-                ct_test(pTest, datetime_compare_date(&bdate, &test_bdate) == 0);
-            }
-        }
-    }
-}
-
-static void testDateEpochConversionCompare(Test *pTest,
-    uint16_t year,
-    uint8_t month,
-    uint8_t day,
-    uint8_t hour,
-    uint8_t minute,
-    uint8_t second,
-    uint8_t hundredth)
-{
-    uint64_t epoch_seconds = 0;
-    BACNET_DATE_TIME bdatetime = { 0 };
-    BACNET_DATE_TIME test_bdatetime = { 0 };
-    int compare = 0;
-
-    datetime_set_date(&bdatetime.date, year, month, day);
-    datetime_set_time(&bdatetime.time, hour, minute, second, hundredth);
-    epoch_seconds = datetime_seconds_since_epoch(&bdatetime);
-    datetime_since_epoch_seconds(&test_bdatetime, epoch_seconds);
-    compare = datetime_compare(&bdatetime, &test_bdatetime);
-    ct_test(pTest, compare == 0);
-    if (compare != 0) {
-        datetime_print("bdatetime", &bdatetime);
-        datetime_print("test_bdatetime", &test_bdatetime);
-    }
-}
-
-static void testDateEpochConversion(Test *pTest)
-{
-    /* min */
-    testDateEpochConversionCompare(
-        pTest, BACNET_DATE_YEAR_EPOCH, 1, 1, 0, 0, 0, 0);
-    /* middle */
-    testDateEpochConversionCompare(pTest, 2020, 6, 26, 12, 30, 30, 0);
-    /* max */
-    testDateEpochConversionCompare(
-        pTest, BACNET_DATE_YEAR_EPOCH + 0xFF - 1, 12, 31, 23, 59, 59, 0);
-}
-
-static void testDateEpoch(Test *pTest)
-{
-    uint32_t days = 0;
-    uint16_t year = 0, test_year = 0;
-    uint8_t month = 0, test_month = 0;
-    uint8_t day = 0, test_day = 0;
-
-    days = datetime_ymd_to_days_since_epoch(BACNET_DATE_YEAR_EPOCH, 1, 1);
-    ct_test(pTest, days == 0);
-    datetime_ymd_from_days_since_epoch(days, &year, &month, &day);
-    ct_test(pTest, year == BACNET_DATE_YEAR_EPOCH);
-    ct_test(pTest, month == 1);
-    ct_test(pTest, day == 1);
-
-    for (year = BACNET_DATE_YEAR_EPOCH; year < (BACNET_DATE_YEAR_EPOCH + 0xFF);
-         year++) {
-        for (month = 1; month <= 12; month++) {
-            for (day = 1; day <= days_per_month(year, month); day++) {
-                days = datetime_ymd_to_days_since_epoch(year, month, day);
-                datetime_ymd_from_days_since_epoch(
-                    days, &test_year, &test_month, &test_day);
-                ct_test(pTest, year == test_year);
-                ct_test(pTest, month == test_month);
-                ct_test(pTest, day == test_day);
-            }
-        }
-    }
-}
-
-static void testBACnetDayOfWeek(Test *pTest)
-{
-    uint8_t dow = 0;
-
-    /* 1/1/1900 is a Monday */
-    dow = datetime_day_of_week(1900, 1, 1);
-    ct_test(pTest, dow == BACNET_WEEKDAY_MONDAY);
-
-    /* 1/1/2007 is a Monday */
-    dow = datetime_day_of_week(2007, 1, 1);
-    ct_test(pTest, dow == BACNET_WEEKDAY_MONDAY);
-    dow = datetime_day_of_week(2007, 1, 2);
-    ct_test(pTest, dow == BACNET_WEEKDAY_TUESDAY);
-    dow = datetime_day_of_week(2007, 1, 3);
-    ct_test(pTest, dow == BACNET_WEEKDAY_WEDNESDAY);
-    dow = datetime_day_of_week(2007, 1, 4);
-    ct_test(pTest, dow == BACNET_WEEKDAY_THURSDAY);
-    dow = datetime_day_of_week(2007, 1, 5);
-    ct_test(pTest, dow == BACNET_WEEKDAY_FRIDAY);
-    dow = datetime_day_of_week(2007, 1, 6);
-    ct_test(pTest, dow == BACNET_WEEKDAY_SATURDAY);
-    dow = datetime_day_of_week(2007, 1, 7);
-    ct_test(pTest, dow == BACNET_WEEKDAY_SUNDAY);
-
-    dow = datetime_day_of_week(2007, 1, 31);
-    ct_test(pTest, dow == 3);
-}
-
-static void testDatetimeCodec(Test *pTest)
-{
-    uint8_t apdu[MAX_APDU];
-    BACNET_DATE_TIME datetimeIn;
-    BACNET_DATE_TIME datetimeOut;
-    int inLen;
-    int outLen;
-
-    datetimeIn.date.day = 1;
-    datetimeIn.date.month = 2;
-    datetimeIn.date.wday = 3;
-    datetimeIn.date.year = 1904;
-
-    datetimeIn.time.hour = 5;
-    datetimeIn.time.min = 6;
-    datetimeIn.time.sec = 7;
-    datetimeIn.time.hundredths = 8;
-
-    inLen = bacapp_encode_context_datetime(apdu, 10, &datetimeIn);
-    outLen = bacapp_decode_context_datetime(apdu, 10, &datetimeOut);
-
-    ct_test(pTest, inLen == outLen);
-
-    ct_test(pTest, datetimeIn.date.day == datetimeOut.date.day);
-    ct_test(pTest, datetimeIn.date.month == datetimeOut.date.month);
-    ct_test(pTest, datetimeIn.date.wday == datetimeOut.date.wday);
-    ct_test(pTest, datetimeIn.date.year == datetimeOut.date.year);
-
-    ct_test(pTest, datetimeIn.time.hour == datetimeOut.time.hour);
-    ct_test(pTest, datetimeIn.time.min == datetimeOut.time.min);
-    ct_test(pTest, datetimeIn.time.sec == datetimeOut.time.sec);
-    ct_test(pTest, datetimeIn.time.hundredths == datetimeOut.time.hundredths);
-}
-
-static void testDatetimeConvertUTCSpecific(Test *pTest,
-    BACNET_DATE_TIME *utc_time,
-    BACNET_DATE_TIME *local_time,
-    int16_t utc_offset_minutes,
-    int8_t dst_adjust_minutes)
-{
-    bool status = false;
-    BACNET_DATE_TIME test_local_time;
-
-    status = datetime_local_to_utc(
-        utc_time, local_time, utc_offset_minutes, dst_adjust_minutes);
-    ct_test(pTest, status);
-    status = datetime_utc_to_local(
-        &test_local_time, utc_time, utc_offset_minutes, dst_adjust_minutes);
-    ct_test(pTest, status);
-    /* validate the conversion */
-    ct_test(pTest, local_time->date.day == test_local_time.date.day);
-    ct_test(pTest, local_time->date.month == test_local_time.date.month);
-    ct_test(pTest, local_time->date.wday == test_local_time.date.wday);
-    ct_test(pTest, local_time->date.year == test_local_time.date.year);
-    ct_test(pTest, local_time->time.hour == test_local_time.time.hour);
-    ct_test(pTest, local_time->time.min == test_local_time.time.min);
-    ct_test(pTest, local_time->time.sec == test_local_time.time.sec);
-    ct_test(
-        pTest, local_time->time.hundredths == test_local_time.time.hundredths);
-}
-
-static void testDatetimeConvertUTC(Test *pTest)
-{
-    BACNET_DATE_TIME local_time;
-    BACNET_DATE_TIME utc_time;
-    /* values are positive east of UTC and negative west of UTC */
-    int16_t utc_offset_minutes = 0;
-    int8_t dst_adjust_minutes = 0;
-
-    datetime_set_date(&local_time.date, 1999, 12, 23);
-    datetime_set_time(&local_time.time, 8, 30, 0, 0);
-    testDatetimeConvertUTCSpecific(
-        pTest, &utc_time, &local_time, utc_offset_minutes, dst_adjust_minutes);
-    /* check a timezone West of UTC */
-    utc_offset_minutes = -6 * 60;
-    dst_adjust_minutes = -60;
-    testDatetimeConvertUTCSpecific(
-        pTest, &utc_time, &local_time, utc_offset_minutes, dst_adjust_minutes);
-    /* check a timezone East of UTC */
-    utc_offset_minutes = 6 * 60;
-    dst_adjust_minutes = 60;
-    testDatetimeConvertUTCSpecific(
-        pTest, &utc_time, &local_time, utc_offset_minutes, dst_adjust_minutes);
-}
-
-void testDateTime(Test *pTest)
-{
-    bool rc;
-
-    /* individual tests */
-    rc = ct_addTestFunction(pTest, testBACnetDate);
-    assert(rc);
-    rc = ct_addTestFunction(pTest, testBACnetTime);
-    assert(rc);
-    rc = ct_addTestFunction(pTest, testBACnetDateTime);
-    assert(rc);
-    rc = ct_addTestFunction(pTest, testBACnetDayOfWeek);
-    assert(rc);
-    rc = ct_addTestFunction(pTest, testDateEpoch);
-    assert(rc);
-    rc = ct_addTestFunction(pTest, testDateEpochConversion);
-    assert(rc);
-    rc = ct_addTestFunction(pTest, testBACnetDateTimeSeconds);
-    assert(rc);
-    rc = ct_addTestFunction(pTest, testBACnetDateTimeAdd);
-    assert(rc);
-    rc = ct_addTestFunction(pTest, testBACnetDateTimeWildcard);
-    assert(rc);
-    rc = ct_addTestFunction(pTest, testDatetimeCodec);
-    assert(rc);
-    rc = ct_addTestFunction(pTest, testDayOfYear);
-    assert(rc);
-    rc = ct_addTestFunction(pTest, testWildcardDateTime);
-    assert(rc);
-    rc = ct_addTestFunction(pTest, testDatetimeConvertUTC);
-    assert(rc);
-}
-
-#ifdef TEST_DATE_TIME
-int main(void)
-{
-    Test *pTest;
-
-    pTest = ct_create("BACnet Date Time", NULL);
-    testDateTime(pTest);
-    ct_setStream(pTest, stdout);
-    ct_run(pTest);
-    (void)ct_report(pTest);
-    ct_destroy(pTest);
-
-    return 0;
-}
-
-#endif /* TEST_DATE_TIME */
-#endif /* BAC_TEST */

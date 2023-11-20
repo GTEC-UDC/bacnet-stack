@@ -89,30 +89,12 @@ extern "C" {
     bool write_property_string_valid(
         BACNET_WRITE_PROPERTY_DATA * wp_data,
         BACNET_APPLICATION_DATA_VALUE * value,
-        int len_max);
+        size_t len_max);
     BACNET_STACK_EXPORT
     bool write_property_empty_string_valid(
         BACNET_WRITE_PROPERTY_DATA * wp_data,
         BACNET_APPLICATION_DATA_VALUE * value,
-        int len_max);
-
-#ifdef BAC_TEST
-#include "ctest.h"
-    BACNET_STACK_EXPORT
-    int wp_decode_apdu(
-        uint8_t * apdu,
-        unsigned apdu_len,
-        uint8_t * invoke_id,
-        BACNET_WRITE_PROPERTY_DATA * wp_data);
-
-    BACNET_STACK_EXPORT
-    void testWriteProperty(
-        Test * pTest);
-    BACNET_STACK_EXPORT
-    void testWritePropertyTag(
-        Test * pTest,
-        BACNET_APPLICATION_DATA_VALUE * value);
-#endif
+        size_t len_max);
 
 #ifdef __cplusplus
 }

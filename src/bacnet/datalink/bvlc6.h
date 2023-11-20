@@ -12,7 +12,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
-#include <time.h>
 #include "bacnet/bacnet_stack_exports.h"
 #include "bacnet/bacdef.h"
 #include "bacnet/npdu.h"
@@ -420,13 +419,6 @@ extern "C" {
         uint8_t * npdu,
         uint16_t npdu_size,
         uint16_t * npdu_len);
-
-#ifdef BAC_TEST
-#include "ctest.h"
-    BACNET_STACK_EXPORT
-    void test_BVLC6(
-        Test * pTest);
-#endif
 
 #ifdef __cplusplus
 }

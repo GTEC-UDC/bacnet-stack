@@ -110,21 +110,21 @@ static uint8_t This_Station = 255;
 /* its value shall be 127. */
 static uint8_t Nmax_master = 127;
 
-/* The time without a DataAvailable or ReceiveError event before declaration */
-/* of loss of token: 500 milliseconds. */
-#define Tno_token 500
-
 /* The minimum time without a DataAvailable or ReceiveError event */
 /* that a node must wait for a station to begin replying to a */
 /* confirmed request: 255 milliseconds. (Implementations may use */
 /* larger values for this timeout, not to exceed 300 milliseconds.) */
+#ifndef Treply_timeout
 #define Treply_timeout 260
+#endif
 
 /* The time without a DataAvailable or ReceiveError event that a node must */
 /* wait for a remote node to begin using a token or replying to a Poll For */
 /* Master frame: 20 milliseconds. (Implementations may use larger values for */
 /* this timeout, not to exceed 35 milliseconds.) */
+#ifndef Tusage_timeout
 #define Tusage_timeout 30
+#endif
 
 /* The minimum number of DataAvailable or ReceiveError events that must be */
 /* seen by a receiving node in order to declare the line "active": 4. */
@@ -138,21 +138,16 @@ static uint8_t Nmax_master = 127;
 /* const uint16_t Tframe_abort = 1 + ((1000 * 60) / 9600); */
 /* At 115200 baud, 60 bit times would be about 0.5 milliseconds */
 /* const uint16_t Tframe_abort = 1 + ((1000 * 60) / 115200); */
+#ifndef Tframe_abort
 #define Tframe_abort 30
+#endif
 
 /* The maximum time a node may wait after reception of a frame that expects */
 /* a reply before sending the first octet of a reply or Reply Postponed */
 /* frame: 250 milliseconds. */
+#ifndef Treply_delay
 #define Treply_delay (250 - 50)
-
-/* The width of the time slot within which a node may generate a token: */
-/* 10 milliseconds. */
-#define Tslot 10
-
-/* The maximum time a node may wait after reception of the token or */
-/* a Poll For Master frame before sending the first octet of a frame: */
-/* 15 milliseconds. */
-#define Tusage_delay 15
+#endif
 
 /* we need to be able to increment without rolling over */
 #define INCREMENT_AND_LIMIT_UINT8(x) \
@@ -259,54 +254,96 @@ static bool dlmstp_compare_data_expecting_reply(uint8_t *request_pdu,
     };
     struct DER_compare_t request;
     struct DER_compare_t reply;
+    bool request_segmented = false;
+    bool reply_segmented = false;
 
     /* decode the request data */
     request.address.mac[0] = src_address;
     request.address.mac_len = 1;
-    offset = npdu_decode(
-        &request_pdu[0], NULL, &request.address, &request.npdu_data);
+    offset = bacnet_npdu_decode(request_pdu, request_pdu_len, NULL,
+        &request.address, &request.npdu_data);
     if (request.npdu_data.network_layer_message) {
+        return false;
+    }
+    if (offset >= request_pdu_len) {
         return false;
     }
     request.pdu_type = request_pdu[offset] & 0xF0;
     if (request.pdu_type != PDU_TYPE_CONFIRMED_SERVICE_REQUEST) {
         return false;
     }
+    if (request_pdu[offset] & BIT(3)) {
+        request_segmented = true;
+    }
+    if ((offset + 2) >= request_pdu_len) {
+        return false;
+    }
     request.invoke_id = request_pdu[offset + 2];
     /* segmented message? */
-    if (request_pdu[offset] & BIT(3))
+    if (request_segmented) {
+        if ((offset + 5) >= request_pdu_len) {
+            return false;
+        }
         request.service_choice = request_pdu[offset + 5];
-    else
+    } else {
+        if ((offset + 3) >= request_pdu_len) {
+            return false;
+        }
         request.service_choice = request_pdu[offset + 3];
+    }
     /* decode the reply data */
     reply.address.mac[0] = dest_address;
     reply.address.mac_len = 1;
-    offset = npdu_decode(&reply_pdu[0], &reply.address, NULL, &reply.npdu_data);
+    offset = bacnet_npdu_decode(
+        reply_pdu, reply_pdu_len, &reply.address, NULL, &reply.npdu_data);
     if (reply.npdu_data.network_layer_message) {
         return false;
     }
+    if (offset >= request_pdu_len) {
+        return false;
+    }
+    reply.pdu_type = reply_pdu[offset] & 0xF0;
+    if (reply_pdu[offset] & BIT(3)) {
+        reply_segmented = true;
+    }
     /* reply could be a lot of things:
        confirmed, simple ack, abort, reject, error */
-    reply.pdu_type = reply_pdu[offset] & 0xF0;
     switch (reply.pdu_type) {
         case PDU_TYPE_SIMPLE_ACK:
+            if ((offset + 2) >= request_pdu_len) {
+                return false;
+            }
             reply.invoke_id = reply_pdu[offset + 1];
             reply.service_choice = reply_pdu[offset + 2];
             break;
         case PDU_TYPE_COMPLEX_ACK:
-            reply.invoke_id = reply_pdu[offset + 1];
             /* segmented message? */
-            if (reply_pdu[offset] & BIT(3))
+            if (reply_segmented) {
+                if ((offset + 4) >= request_pdu_len) {
+                    return false;
+                }
+                reply.invoke_id = reply_pdu[offset + 1];
                 reply.service_choice = reply_pdu[offset + 4];
-            else
+            } else {
+                if ((offset + 2) >= request_pdu_len) {
+                    return false;
+                }
+                reply.invoke_id = reply_pdu[offset + 1];
                 reply.service_choice = reply_pdu[offset + 2];
+            }
             break;
         case PDU_TYPE_ERROR:
+            if ((offset + 2) >= request_pdu_len) {
+                return false;
+            }
             reply.invoke_id = reply_pdu[offset + 1];
             reply.service_choice = reply_pdu[offset + 2];
             break;
         case PDU_TYPE_REJECT:
         case PDU_TYPE_ABORT:
+            if ((offset + 1) >= request_pdu_len) {
+                return false;
+            }
             reply.invoke_id = reply_pdu[offset + 1];
             break;
         default:
@@ -694,6 +731,73 @@ static void MSTP_Receive_Frame_FSM(void)
     return;
 }
 
+static void MSTP_Slave_Node_FSM(void)
+{
+    /* destination address */
+    uint8_t destination;
+    /* source address */
+    uint8_t source;
+    /* any data to be sent - may be null */
+    uint8_t *data;
+    /* amount of data to be sent - may be 0 */
+    uint16_t data_len;
+    /* packet from the PDU Queue */
+    struct dlmstp_packet *pkt;
+
+    if (MSTP_Flag.ReceivedInvalidFrame) {
+        /* ReceivedInvalidFrame */
+        /* invalid frame was received */
+        MSTP_Flag.ReceivedInvalidFrame = false;
+    } else if (MSTP_Flag.ReceivedValidFrame) {
+        switch (FrameType) {
+            case FRAME_TYPE_BACNET_DATA_EXPECTING_REPLY:
+                if (DestinationAddress != MSTP_BROADCAST_ADDRESS) {
+                    /* The ANSWER_DATA_REQUEST state is entered when a  */
+                    /* BACnet Data Expecting Reply, a Test_Request, or  */
+                    /* a proprietary frame that expects a reply is received. */
+                    pkt = (struct dlmstp_packet *)Ringbuf_Peek(&PDU_Queue);
+                    if (pkt != NULL) {
+                        MSTP_Send_Frame(pkt->frame_type, pkt->address.mac[0],
+                            This_Station, (uint8_t *)&pkt->pdu[0],
+                            pkt->pdu_len);
+                        Master_State = MSTP_MASTER_STATE_IDLE;
+                        /* clear our flag we were holding for comparison */
+                        MSTP_Flag.ReceivedValidFrame = false;
+                        /* clear the queue */
+                        (void)Ringbuf_Pop(&PDU_Queue, NULL);
+                    } else if (rs485_silence_elapsed(Treply_delay)) {
+                        /* If no reply will be available from the higher layers
+                           within Treply_delay after the reception of the final
+                           octet of the requesting frame (the mechanism used
+                           to determine this is a local matter), then no reply
+                           is possible. */
+                        MSTP_Flag.ReceivedValidFrame = false;
+                    }
+                } else {
+                    /* no reply when addressed as Broadcast */
+                    MSTP_Flag.ReceivedValidFrame = false;
+                }
+                break;
+            case FRAME_TYPE_TEST_REQUEST:
+                MSTP_Flag.ReceivedValidFrame = false;
+                destination = SourceAddress;
+                source = This_Station;
+                data = &InputBuffer[0];
+                data_len = DataLength;
+                MSTP_Send_Frame(FRAME_TYPE_TEST_RESPONSE, destination, source,
+                    data, data_len);
+                break;
+            case FRAME_TYPE_TOKEN:
+            case FRAME_TYPE_POLL_FOR_MASTER:
+            case FRAME_TYPE_TEST_RESPONSE:
+            case FRAME_TYPE_BACNET_DATA_NOT_EXPECTING_REPLY:
+            default:
+                MSTP_Flag.ReceivedValidFrame = false;
+                break;
+        }
+    }
+}
+
 /* returns true if we need to transition immediately */
 static bool MSTP_Master_Node_FSM(void)
 {
@@ -812,14 +916,24 @@ static bool MSTP_Master_Node_FSM(void)
                         }
                         break;
                     case FRAME_TYPE_BACNET_DATA_NOT_EXPECTING_REPLY:
-                        /* indicate successful reception to the higher layers */
-                        MSTP_Flag.ReceivePacketPending = true;
+                        if ((DestinationAddress == MSTP_BROADCAST_ADDRESS) &&
+                            (npdu_confirmed_service(InputBuffer, DataLength))) {
+                            /* BTL test: verifies that the IUT will quietly
+                               discard any Confirmed-Request-PDU, whose
+                               destination address is a multicast or
+                               broadcast address, received from the
+                               network layer. */
+                        } else {
+                            /* indicate successful reception to higher layer */
+                            MSTP_Flag.ReceivePacketPending = true;
+                        }
                         break;
                     case FRAME_TYPE_BACNET_DATA_EXPECTING_REPLY:
-                        /* indicate successful reception to higher layers */
-                        MSTP_Flag.ReceivePacketPending = true;
-                        /* broadcast DER just remains IDLE */
-                        if (DestinationAddress != MSTP_BROADCAST_ADDRESS) {
+                        if (DestinationAddress == MSTP_BROADCAST_ADDRESS) {
+                            /* broadcast DER just remains IDLE */
+                        } else {
+                            /* indicate successful reception to higher layers */
+                            MSTP_Flag.ReceivePacketPending = true;
                             Master_State =
                                 MSTP_MASTER_STATE_ANSWER_DATA_REQUEST;
                         }
@@ -1519,9 +1633,13 @@ uint16_t dlmstp_receive(BACNET_ADDRESS *src, /* source address */
                 This_Station = 255;
             }
         } else {
-            while (MSTP_Master_Node_FSM()) {
-                /* do nothing while some states fast transition */
-            };
+            if ((This_Station > 127) && (This_Station < 255)) {
+                MSTP_Slave_Node_FSM();
+            } else if (This_Station <= 127) {
+                while (MSTP_Master_Node_FSM()) {
+                    /* do nothing while some states fast transition */
+                };
+            }
         }
     }
     if (This_Station != 255) {

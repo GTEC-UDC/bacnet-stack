@@ -101,53 +101,41 @@
 /* not to exceed 100 milliseconds.) */
 /* At 9600 baud, 60 bit times would be about 6.25 milliseconds */
 /* const uint16_t Tframe_abort = 1 + ((1000 * 60) / 9600); */
+#ifndef Tframe_abort
 #define Tframe_abort 30
-
-/* The maximum idle time a sending node may allow to elapse between octets */
-/* of a frame the node is transmitting: 20 bit times. */
-#define Tframe_gap 20
-
-/* The time without a DataAvailable or ReceiveError event before declaration */
-/* of loss of token: 500 milliseconds. */
-#define Tno_token 500
-
-/* The maximum time after the end of the stop bit of the final */
-/* octet of a transmitted frame before a node must disable its */
-/* EIA-485 driver: 15 bit times. */
-#define Tpostdrive 15
+#endif
 
 /* The maximum time a node may wait after reception of a frame that expects */
 /* a reply before sending the first octet of a reply or Reply Postponed */
 /* frame: 250 milliseconds. */
 /* note: we always send a reply postponed since a message other than
    the reply may be in the transmit queue */
+#ifndef Treply_delay
 #define Treply_delay 10
+#endif
 
 /* The minimum time without a DataAvailable or ReceiveError event */
 /* that a node must wait for a station to begin replying to a */
 /* confirmed request: 255 milliseconds. (Implementations may use */
 /* larger values for this timeout, not to exceed 300 milliseconds.) */
+#ifndef Treply_timeout
 #define Treply_timeout 255
+#endif
 
 /* Repeater turnoff delay. The duration of a continuous logical one state */
 /* at the active input port of an MS/TP repeater after which the repeater */
 /* will enter the IDLE state: 29 bit times < Troff < 40 bit times. */
+#ifndef Troff
 #define Troff 30
-
-/* The width of the time slot within which a node may generate a token: */
-/* 10 milliseconds. */
-#define Tslot 10
-
-/* The maximum time a node may wait after reception of the token or */
-/* a Poll For Master frame before sending the first octet of a frame: */
-/* 15 milliseconds. */
-#define Tusage_delay 15
+#endif
 
 /* The minimum time without a DataAvailable or ReceiveError event that a */
 /* node must wait for a remote node to begin using a token or replying to */
 /* a Poll For Master frame: 20 milliseconds. (Implementations may use */
 /* larger values for this timeout, not to exceed 100 milliseconds.) */
+#ifndef Tusage_timeout
 #define Tusage_timeout 20
+#endif
 
 /* we need to be able to increment without rolling over */
 #define INCREMENT_AND_LIMIT_UINT8(x) \
@@ -579,8 +567,8 @@ static bool mstp_compare_data_expecting_reply(uint8_t *request_pdu,
     /* decode the request data */
     request.address.mac[0] = src_address;
     request.address.mac_len = 1;
-    offset = npdu_decode(
-        &request_pdu[0], NULL, &request.address, &request.npdu_data);
+    offset = bacnet_npdu_decode(request_pdu, request_pdu_len, NULL,
+        &request.address, &request.npdu_data);
     if (request.npdu_data.network_layer_message) {
         return false;
     }
@@ -597,7 +585,8 @@ static bool mstp_compare_data_expecting_reply(uint8_t *request_pdu,
     /* decode the reply data */
     reply.address.mac[0] = dest_address;
     reply.address.mac_len = 1;
-    offset = npdu_decode(&reply_pdu[0], &reply.address, NULL, &reply.npdu_data);
+    offset = bacnet_npdu_decode(
+        reply_pdu, reply_pdu_len, &reply.address, NULL, &reply.npdu_data);
     if (reply.npdu_data.network_layer_message) {
         return false;
     }
@@ -764,22 +753,33 @@ bool MSTP_Master_Node_FSM(volatile struct mstp_port_struct_t *mstp_port)
                             }
                             break;
                         case FRAME_TYPE_BACNET_DATA_NOT_EXPECTING_REPLY:
-                            /* indicate successful reception to the higher
-                             * layers */
-                            dlmstp_put_receive(mstp_port->SourceAddress,
-                                (uint8_t *)&mstp_port->InputBuffer[0],
-                                mstp_port->DataLength);
+                            if ((mstp_port->DestinationAddress ==
+                                    MSTP_BROADCAST_ADDRESS) &&
+                                (npdu_confirmed_service(mstp_port->InputBuffer,
+                                    mstp_port->DataLength))) {
+                                /* BTL test: verifies that the IUT will quietly
+                                   discard any Confirmed-Request-PDU, whose
+                                   destination address is a multicast or
+                                   broadcast address, received from the
+                                   network layer. */
+                            } else {
+                                /* indicate successful reception to the higher
+                                 * layers */
+                                dlmstp_put_receive(mstp_port->SourceAddress,
+                                    (uint8_t *)&mstp_port->InputBuffer[0],
+                                    mstp_port->DataLength);
+                            }
                             break;
                         case FRAME_TYPE_BACNET_DATA_EXPECTING_REPLY:
-                            /*mstp_port->ReplyPostponedTimer = 0; */
-                            /* indicate successful reception to the higher
-                             * layers  */
-                            dlmstp_put_receive(mstp_port->SourceAddress,
-                                (uint8_t *)&mstp_port->InputBuffer[0],
-                                mstp_port->DataLength);
-                            /* broadcast DER just remains IDLE */
-                            if (mstp_port->DestinationAddress !=
+                            if (mstp_port->DestinationAddress ==
                                 MSTP_BROADCAST_ADDRESS) {
+                                /* broadcast DER just remains IDLE */
+                            } else {
+                                /* indicate successful reception to the higher
+                                 * layers  */
+                                dlmstp_put_receive(mstp_port->SourceAddress,
+                                    (uint8_t *)&mstp_port->InputBuffer[0],
+                                    mstp_port->DataLength);
                                 mstp_port->master_state =
                                     MSTP_MASTER_STATE_ANSWER_DATA_REQUEST;
                             }

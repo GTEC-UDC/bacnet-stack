@@ -44,7 +44,7 @@ extern "C" {
     BACNET_STACK_EXPORT
     int bacerror_decode_service_request(
         uint8_t * apdu,
-        unsigned apdu_len,
+        unsigned apdu_size,
         uint8_t * invoke_id,
         BACNET_CONFIRMED_SERVICE * service,
         BACNET_ERROR_CLASS * error_class,
@@ -53,25 +53,9 @@ extern "C" {
     BACNET_STACK_EXPORT
     int bacerror_decode_error_class_and_code(
         uint8_t * apdu,
-        unsigned apdu_len,
+        unsigned apdu_size,
         BACNET_ERROR_CLASS * error_class,
         BACNET_ERROR_CODE * error_code);
-
-#ifdef BAC_TEST
-#include "ctest.h"
-    BACNET_STACK_EXPORT
-    int bacerror_decode_apdu(
-        uint8_t * apdu,
-        unsigned apdu_len,
-        uint8_t * invoke_id,
-        BACNET_CONFIRMED_SERVICE * service,
-        BACNET_ERROR_CLASS * error_class,
-        BACNET_ERROR_CODE * error_code);
-
-    BACNET_STACK_EXPORT
-    void testBACError(
-        Test * pTest);
-#endif
 
 #ifdef __cplusplus
 }

@@ -31,7 +31,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h> /* for time */
-#ifdef __STDC_ISO_10646__
+#if (__STDC_VERSION__ >= 199901L) && defined (__STDC_ISO_10646__)
 #include <locale.h>
 #endif
 #include <errno.h>
@@ -215,11 +215,12 @@ static void MyAbortHandler(
 #endif
         Error_Detected = true;
         Last_Error_Class = ERROR_CLASS_SERVICES;
-        if (abort_reason < MAX_BACNET_ABORT_REASON)
+        if (abort_reason < MAX_BACNET_ABORT_REASON) {
             Last_Error_Code =
                 (ERROR_CODE_ABORT_BUFFER_OVERFLOW - 1) + abort_reason;
-        else
+        } else {
             Last_Error_Code = ERROR_CODE_ABORT_OTHER;
+        }
     }
 }
 
@@ -236,11 +237,12 @@ static void MyRejectHandler(
 #endif
         Error_Detected = true;
         Last_Error_Class = ERROR_CLASS_SERVICES;
-        if (reject_reason < MAX_BACNET_REJECT_REASON)
+        if (reject_reason < MAX_BACNET_REJECT_REASON) {
             Last_Error_Code =
                 (ERROR_CODE_REJECT_BUFFER_OVERFLOW - 1) + reject_reason;
-        else
+        } else {
             Last_Error_Code = ERROR_CODE_REJECT_OTHER;
+        }
     }
 }
 
@@ -265,8 +267,9 @@ static void MyReadPropertyAckHandler(uint8_t *service_request,
             Read_Property_Multiple_Data.rpm_data = rp_data;
             Read_Property_Multiple_Data.new_data = true;
         } else {
-            if (len < 0) /* Eg, failed due to no segmentation */
+            if (len < 0) { /* Eg, failed due to no segmentation */
                 Error_Detected = true;
+            }
             free(rp_data);
         }
     }
@@ -294,8 +297,10 @@ static void MyReadPropertyMultipleAckHandler(uint8_t *service_request,
             Read_Property_Multiple_Data.new_data = true;
             /* Will process and free the RPM data later */
         } else {
-            if (len < 0) /* Eg, failed due to no segmentation */
+            if (len < 0) { /* Eg, failed due to no segmentation */
                 Error_Detected = true;
+            }
+            rpm_data = rpm_data_free(rpm_data);
             free(rpm_data);
         }
     }
@@ -421,8 +426,9 @@ static void CheckIsWritableProperty(BACNET_OBJECT_TYPE object_type,
      * Life Safety Tracking_Value, Reliability, Mode,
      * or Present_Value when Out_Of_Service is TRUE.
      */
-    if (bIsWritable)
+    if (bIsWritable) {
         fprintf(stdout, " Writable");
+    }
 }
 
 static const char *protocol_services_supported_text(size_t bit_index)
@@ -498,8 +504,9 @@ static bool PrettyPrintPropertyValue(
                             fprintf(stream, " %s,",
                                 protocol_services_supported_text(j));
                         }
-                    } else /* not supported */
+                    } else { /* not supported */
                         fprintf(stream, ",");
+                    }
                 }
                 fprintf(stream, "\n        ");
             }
@@ -518,8 +525,9 @@ static bool PrettyPrintPropertyValue(
         assert(false); /* How did I get here?  Fix your code. */
         /* Meanwhile, a fallback plan */
         status = bacapp_print_value(stdout, object_value);
-    } else
+    } else {
         fprintf(stream, "? \n");
+    }
 
     return status;
 }
@@ -576,9 +584,10 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
                         PROP_PROTOCOL_CONFORMANCE_CLASS;
                     break;
                 }
-                if (object_type == OBJECT_DATETIME_VALUE)
+                if (object_type == OBJECT_DATETIME_VALUE) {
                     break; /* A special case - no braces for this pair */
-                /* Else, fall through to normal processing. */
+                }
+                BACNET_STACK_FALLTHROUGH();
             default:
                 /* Normal array: open brace */
                 fprintf(stdout, "{ ");
@@ -587,8 +596,9 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
         }
     }
 
-    if (!Using_Walked_List)
+    if (!Using_Walked_List) {
         Walked_List_Index = Walked_List_Length = 0; /* In case we need this. */
+    }
     /* value(s) loop until there is no "next" ... */
     while (value != NULL) {
         object_value.object_property = rpm_property->propertyIdentifier;
@@ -608,19 +618,22 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
                          * print it! */
                         Walked_List_Length = value->type.Unsigned_Int;
                         if (rpm_property->propertyIdentifier ==
-                            PROP_OBJECT_LIST)
+                            PROP_OBJECT_LIST) {
                             Object_List_Length = value->type.Unsigned_Int;
+                        }
                         break;
-                    } else
+                    } else {
                         assert(Walked_List_Index ==
                             (uint32_t)rpm_property->propertyArrayIndex);
+                    }
                 } else {
                     Walked_List_Index++;
                     /* If we got the whole Object List array in one RP call,
                      * keep the Index and List_Length in sync as we cycle
                      * through. */
-                    if (rpm_property->propertyIdentifier == PROP_OBJECT_LIST)
+                    if (rpm_property->propertyIdentifier == PROP_OBJECT_LIST) {
                         Object_List_Length = ++Object_List_Index;
+                    }
                 }
                 if (Walked_List_Index == 1) {
                     /* If the array is empty (nothing for this first entry),
@@ -634,10 +647,11 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
                     /* Open this Array of Objects for the first entry (unless
                      * opening brace has already printed, since this is an array
                      * of values[] ) */
-                    if (value->next == NULL)
+                    if (value->next == NULL) {
                         fprintf(stdout, "{ \n        ");
-                    else
+                    } else {
                         fprintf(stdout, "\n        ");
+                    }
                 }
 
                 if (rpm_property->propertyIdentifier == PROP_OBJECT_LIST) {
@@ -664,7 +678,7 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
                         int iLast15idx =
                             value->type.Character_String.length - 15;
                         value->type.Character_String.value[15] = '-';
-                        memcpy(&value->type.Character_String.value[16],
+                        memmove(&value->type.Character_String.value[16],
                             &value->type.Character_String.value[iLast15idx],
                             15);
                         value->type.Character_String.value[31] = 0;
@@ -685,18 +699,21 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
 
                 /* If the object is a Sequence, it needs its own bracketing
                  * braces */
-                if (isSequence)
+                if (isSequence) {
                     fprintf(stdout, "{");
+                }
                 bacapp_print_value(stdout, &object_value);
-                if (isSequence)
+                if (isSequence) {
                     fprintf(stdout, "}");
+                }
 
                 if ((Walked_List_Index < Walked_List_Length) ||
                     (value->next != NULL)) {
                     /* There are more. */
                     fprintf(stdout, ", ");
-                    if (!(Walked_List_Index % 3))
+                    if (!(Walked_List_Index % 3)) {
                         fprintf(stdout, "\n        ");
+                    }
                 } else {
                     fprintf(stdout, " } \n");
                 }
@@ -730,7 +747,7 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
                                 fprintf(stdout, "?");
                                 break;
                             }
-                            /* Else, fall through for normal processing. */
+                            BACNET_STACK_FALLTHROUGH();
                         case PROP_DAYLIGHT_SAVINGS_STATUS:
                         case PROP_LOCAL_TIME:
                         case PROP_LOCAL_DATE: /* Only if !ShowValues */
@@ -743,7 +760,7 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
                                 fprintf(stdout, "?");
                                 break;
                             }
-                            /* Else, fall through and print value: */
+                            BACNET_STACK_FALLTHROUGH();
                         default:
                             bacapp_print_value(stdout, &object_value);
                             break;
@@ -776,10 +793,10 @@ static void PrintReadPropertyData(BACNET_OBJECT_TYPE object_type,
  */
 static void Print_Property_Identifier(unsigned propertyIdentifier)
 {
-    if (propertyIdentifier < 512) {
-        fprintf(stdout, "%s", bactext_property_name(propertyIdentifier));
-    } else {
+    if (bactext_property_name_proprietary(propertyIdentifier)) {
         fprintf(stdout, "-- proprietary %u", propertyIdentifier);
+    } else {
+        fprintf(stdout, "%s", bactext_property_name(propertyIdentifier));
     }
 }
 
@@ -878,6 +895,8 @@ static uint8_t Read_Properties(
                 case PROP_SUBORDINATE_LIST:
                     IsLongArray = true;
                     break;
+                default:
+                    break;
             }
         }
         invoke_id = Send_Read_Property_Request(device_instance, pMyObject->type,
@@ -966,9 +985,9 @@ static EPICS_STATES ProcessRPMData(
     if (myState == GET_HEADING_RESPONSE) {
         nextState = PRINT_HEADING;
         /* press ahead with or without the data */
-    } else if (bSuccess && (myState == GET_ALL_RESPONSE))
+    } else if (bSuccess && (myState == GET_ALL_RESPONSE)) {
         nextState = NEXT_OBJECT;
-    else if (bSuccess) { /* and GET_LIST_OF_ALL_RESPONSE */
+    } else if (bSuccess) { /* and GET_LIST_OF_ALL_RESPONSE */
         /* Now append the properties we waited on. */
         if (bHasStructuredViewList) {
             Property_List[Property_List_Index] = PROP_STRUCTURED_OBJECT_LIST;
@@ -999,6 +1018,7 @@ static void print_usage(char *filename)
 
 static void print_help(char *filename)
 {
+    (void)filename;
     printf("Generates Full EPICS file, including Object and Property List\n");
     printf("device-instance:\n"
            "BACnet Device Object Instance number that you are\n"
@@ -1071,11 +1091,13 @@ static int CheckCommandLineArgs(int argc, char *argv[])
                     break;
                 case 'n':
                     /* Destination Network Number */
-                    if (Target_Address.mac_len == 0)
+                    if (Target_Address.mac_len == 0) {
                         fprintf(
                             stderr, "Must provide a Target MAC before DNET \n");
-                    if (++i < argc)
+                    }
+                    if (++i < argc) {
                         Target_Address.net = (uint16_t)strtol(argv[i], NULL, 0);
+                    }
                     /* Used strtol so dest.net can be either 0x1234 or 4660 */
                     break;
                 case 't':
@@ -1101,10 +1123,9 @@ static int CheckCommandLineArgs(int argc, char *argv[])
                         } else {
                             printf("ERROR: invalid Target MAC %s \n", argv[i]);
                         }
-                        /* And fall through to print_usage */
+                        /* fall through to print_usage */
                     }
-                    /* Either break or fall through, as above */
-                    /* break; */
+                    BACNET_STACK_FALLTHROUGH();
                 default:
                     print_usage(filename);
                     exit(0);
@@ -1210,8 +1231,9 @@ static void PrintHeading(void)
         int i, len = bitstring_bits_used(&value->type.Bit_String);
         printf("-- services reported by this device\n");
         for (i = 0; i < len; i++) {
-            if (bitstring_bit(&value->type.Bit_String, (uint8_t)i))
+            if (bitstring_bit(&value->type.Bit_String, (uint8_t)i)) {
                 printf(" %s\n", protocol_services_supported_text(i));
+            }
         }
     } else {
         printf("-- use \'Initiate\' or \'Execute\' or both for services.\n");
@@ -1257,8 +1279,9 @@ static void PrintHeading(void)
         int i, len = bitstring_bits_used(&value->type.Bit_String);
         printf("-- objects reported by this device\n");
         for (i = 0; i < len; i++) {
-            if (bitstring_bit(&value->type.Bit_String, (uint8_t)i))
+            if (bitstring_bit(&value->type.Bit_String, (uint8_t)i)) {
                 printf(" %s\n", bactext_object_type_name(i));
+            }
         }
     } else {
         printf("-- possible objects in this device\n");
@@ -1441,7 +1464,7 @@ int main(int argc, char *argv[])
     address_init();
     Init_Service_Handlers();
     dlenv_init();
-#ifdef __STDC_ISO_10646__
+#if (__STDC_VERSION__ >= 199901L) && defined (__STDC_ISO_10646__)
     /* Internationalized programs must call setlocale()
      * to initiate a specific language operation.
      * This can be done by calling setlocale() as follows.
@@ -1478,8 +1501,9 @@ int main(int argc, char *argv[])
 
             } else {
                 /* Update by adding the MAC address */
-                if (max_apdu == 0)
+                if (max_apdu == 0) {
                     max_apdu = MAX_APDU; /* Whatever set for this datalink. */
+                }
                 address_add_binding(
                     Target_Device_Object_Instance, max_apdu, &Target_Address);
             }
@@ -1559,8 +1583,7 @@ int main(int argc, char *argv[])
                     Print_Device_Heading();
                 }
                 myState = GET_ALL_REQUEST;
-                /* Fall through now */
-
+                BACNET_STACK_FALLTHROUGH();
             case GET_ALL_REQUEST:
             case GET_LIST_OF_ALL_REQUEST:
                 /* "list" differs in ArrayIndex only */
@@ -1572,10 +1595,11 @@ int main(int argc, char *argv[])
                     buffer, MAX_PDU, Target_Device_Object_Instance, rpm_object);
                 if (Request_Invoke_ID > 0) {
                     elapsed_seconds = 0;
-                    if (myState == GET_LIST_OF_ALL_REQUEST)
+                    if (myState == GET_LIST_OF_ALL_REQUEST) {
                         myState = GET_LIST_OF_ALL_RESPONSE;
-                    else
+                    } else {
                         myState = GET_ALL_RESPONSE;
+                    }
                 }
                 break;
 
@@ -1606,10 +1630,10 @@ int main(int argc, char *argv[])
                 } else if (tsm_invoke_id_free(Request_Invoke_ID)) {
                     elapsed_seconds = 0;
                     Request_Invoke_ID = 0;
-                    if (myState == GET_HEADING_RESPONSE)
+                    if (myState == GET_HEADING_RESPONSE) {
                         myState = PRINT_HEADING;
-                    /* just press ahead without the data */
-                    else if (Error_Detected) {
+                        /* just press ahead without the data */
+                    } else if (Error_Detected) {
                         if (Last_Error_Code ==
                             ERROR_CODE_REJECT_UNRECOGNIZED_SERVICE) {
                             /* The normal case for Device Object */
@@ -1620,38 +1644,41 @@ int main(int argc, char *argv[])
                             ERROR_CODE_ABORT_SEGMENTATION_NOT_SUPPORTED) {
                             myState = GET_PROPERTY_REQUEST;
                             StartNextObject(rpm_object, &myObject);
-                        } else if (myState == GET_ALL_RESPONSE)
+                        } else if (myState == GET_ALL_RESPONSE) {
                             /* Try again, just to get a list of properties. */
                             myState = GET_LIST_OF_ALL_REQUEST;
-                        else {
+                        } else {
                             /* Else drop back to RP. */
                             myState = GET_PROPERTY_REQUEST;
                             StartNextObject(rpm_object, &myObject);
                         }
-                    } else if (Has_RPM)
+                    } else if (Has_RPM) {
                         myState = GET_ALL_REQUEST; /* Let's try again */
-                    else
+                    } else {
                         myState = GET_PROPERTY_REQUEST;
+                    }
                 } else if (tsm_invoke_id_failed(Request_Invoke_ID)) {
                     fprintf(stderr, "\rError: TSM Timeout!\n");
                     tsm_free_invoke_id(Request_Invoke_ID);
                     Request_Invoke_ID = 0;
                     elapsed_seconds = 0;
-                    if (myState == GET_HEADING_RESPONSE)
+                    if (myState == GET_HEADING_RESPONSE) {
                         myState = PRINT_HEADING;
-                    /* just press ahead without the data */
-                    else
+                        /* just press ahead without the data */
+                    } else {
                         myState = GET_ALL_REQUEST; /* Let's try again */
+                    }
                 } else if (Error_Detected) {
                     /* Don't think we'll ever actually reach this point. */
                     elapsed_seconds = 0;
                     Request_Invoke_ID = 0;
-                    if (myState == GET_HEADING_RESPONSE)
+                    if (myState == GET_HEADING_RESPONSE) {
                         myState = PRINT_HEADING;
-                    /* just press ahead without the data */
-                    else
-                        myState = NEXT_OBJECT; /* Give up and move on to the
-                                                  next. */
+                        /* just press ahead without the data */
+                    } else {
+                        myState = NEXT_OBJECT;
+                    } /* Give up and move on to the
+                                                                       next. */
                     Error_Count++;
                 }
                 break;
@@ -1668,8 +1695,9 @@ int main(int argc, char *argv[])
                 if (Request_Invoke_ID == 0) {
                     /* Reached the end of the list. */
                     myState = NEXT_OBJECT; /* Move on to the next. */
-                } else
+                } else {
                     myState = GET_PROPERTY_RESPONSE;
+                }
                 break;
 
             case GET_PROPERTY_RESPONSE:
@@ -1784,8 +1812,9 @@ int main(int argc, char *argv[])
                         myObject.type = KEY_DECODE_TYPE(nextKey);
                         myObject.instance = KEY_DECODE_ID(nextKey);
                         /* Don't re-list the Device Object among its objects */
-                        if (myObject.type == OBJECT_DEVICE)
+                        if (myObject.type == OBJECT_DEVICE) {
                             continue;
+                        }
                         /* Closing brace for the previous Object */
                         printf("  }, \n");
                         /* Opening brace for the new Object */
@@ -1802,9 +1831,9 @@ int main(int argc, char *argv[])
                          */
                         myObject.type = MAX_BACNET_OBJECT_TYPE;
                     }
-                    if (Has_RPM)
+                    if (Has_RPM) {
                         myState = GET_ALL_REQUEST;
-                    else {
+                    } else {
                         myState = GET_PROPERTY_REQUEST;
                         StartNextObject(rpm_object, &myObject);
                     }

@@ -8,7 +8,7 @@
  * @brief test BACnet integer encode/decode APIs
  */
 
-#include <ztest.h>
+#include <zephyr/ztest.h>
 #include <bacnet/npdu.h>
 
 /**
@@ -19,7 +19,50 @@
 /**
  * @brief Test
  */
+#if defined(CONFIG_ZTEST_NEW_API)
+ZTEST(npdu_tests, test_NPDU_Network)
+#else
+static void test_NPDU_Network(void)
+#endif
+{
+    uint8_t pdu[480] = { 0 };
+    BACNET_ADDRESS dest = { 0 };
+    BACNET_ADDRESS src = { 0 };
+    BACNET_ADDRESS npdu_dest = { 0 };
+    BACNET_ADDRESS npdu_src = { 0 };
+    int len = 0;
+    bool data_expecting_reply = true;
+    BACNET_NETWORK_MESSAGE_TYPE network_message_type =
+        NETWORK_MESSAGE_NETWORK_NUMBER_IS;
+    BACNET_MESSAGE_PRIORITY priority = MESSAGE_PRIORITY_NORMAL;
+    BACNET_NPDU_DATA npdu_data = { 0 };
+    int npdu_len = 0;
+    bool network_layer_message = true;
+    uint16_t vendor_id = 0; /* optional, if net message type is > 0x80 */
+
+    npdu_encode_npdu_network(&npdu_data,
+        network_message_type,
+        data_expecting_reply, priority);
+    len = npdu_encode_pdu(&pdu[0], &dest, &src, &npdu_data);
+    zassert_not_equal(len, 0, NULL);
+    /* can we get the info back? */
+    npdu_len = bacnet_npdu_decode(pdu, sizeof(pdu), &npdu_dest, &npdu_src, &npdu_data);
+    zassert_not_equal(npdu_len, 0, NULL);
+    zassert_equal(npdu_data.data_expecting_reply, data_expecting_reply, NULL);
+    zassert_equal(npdu_data.network_layer_message, network_layer_message, NULL);
+    zassert_equal(npdu_data.network_message_type, network_message_type, NULL);
+    zassert_equal(npdu_data.vendor_id, vendor_id, NULL);
+    zassert_equal(npdu_data.priority, priority, NULL);
+}
+
+/**
+ * @brief Test
+ */
+#if defined(CONFIG_ZTEST_NEW_API)
+ZTEST(npdu_tests, testNPDU2)
+#else
 static void testNPDU2(void)
+#endif
 {
     uint8_t pdu[480] = { 0 };
     BACNET_ADDRESS dest = { 0 };
@@ -60,7 +103,7 @@ static void testNPDU2(void)
     len = npdu_encode_pdu(&pdu[0], &dest, &src, &npdu_data);
     zassert_not_equal(len, 0, NULL);
     /* can we get the info back? */
-    npdu_len = npdu_decode(&pdu[0], &npdu_dest, &npdu_src, &npdu_data);
+    npdu_len = bacnet_npdu_decode(pdu, sizeof(pdu), &npdu_dest, &npdu_src, &npdu_data);
     zassert_not_equal(npdu_len, 0, NULL);
     zassert_equal(npdu_data.data_expecting_reply, data_expecting_reply, NULL);
     zassert_equal(npdu_data.network_layer_message, network_layer_message, NULL);
@@ -83,7 +126,11 @@ static void testNPDU2(void)
     }
 }
 
+#if defined(CONFIG_ZTEST_NEW_API)
+ZTEST(npdu_tests, testNPDU1)
+#else
 static void testNPDU1(void)
+#endif
 {
     uint8_t pdu[480] = { 0 };
     BACNET_ADDRESS dest = { 0 };
@@ -125,7 +172,7 @@ static void testNPDU1(void)
     len = npdu_encode_pdu(&pdu[0], &dest, &src, &npdu_data);
     zassert_not_equal(len, 0, NULL);
     /* can we get the info back? */
-    npdu_len = npdu_decode(&pdu[0], &npdu_dest, &npdu_src, &npdu_data);
+    npdu_len = bacnet_npdu_decode(pdu, sizeof(pdu), &npdu_dest, &npdu_src, &npdu_data);
     zassert_not_equal(npdu_len, 0, NULL);
     zassert_equal(npdu_data.data_expecting_reply, data_expecting_reply, NULL);
     zassert_equal(npdu_data.network_layer_message, network_layer_message, NULL);
@@ -142,12 +189,17 @@ static void testNPDU1(void)
  */
 
 
+#if defined(CONFIG_ZTEST_NEW_API)
+ZTEST_SUITE(npdu_tests, NULL, NULL, NULL, NULL, NULL);
+#else
 void test_main(void)
 {
     ztest_test_suite(npdu_tests,
      ztest_unit_test(testNPDU1),
-     ztest_unit_test(testNPDU2)
+     ztest_unit_test(testNPDU2),
+     ztest_unit_test(test_NPDU_Network)
      );
 
     ztest_run_test_suite(npdu_tests);
 }
+#endif

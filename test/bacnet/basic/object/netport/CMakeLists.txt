@@ -34,8 +34,10 @@ add_executable(${PROJECT_NAME}
     # File(s) under test
 	${SRC_DIR}/bacnet/basic/object/netport.c
     # Support files and stubs (pathname alphabetical)
+	${SRC_DIR}/bacnet/bacaddr.c
 	${SRC_DIR}/bacnet/bacapp.c
 	${SRC_DIR}/bacnet/bacdcode.c
+	${SRC_DIR}/bacnet/bacdest.c
 	${SRC_DIR}/bacnet/bacdevobjpropref.c
 	${SRC_DIR}/bacnet/bacerror.c
 	${SRC_DIR}/bacnet/bacint.c
@@ -47,9 +49,14 @@ add_executable(${PROJECT_NAME}
 	${SRC_DIR}/bacnet/datetime.c
 	${SRC_DIR}/bacnet/basic/sys/days.c
 	${SRC_DIR}/bacnet/indtext.c
+	${SRC_DIR}/bacnet/hostnport.c
 	${SRC_DIR}/bacnet/lighting.c
 	${SRC_DIR}/bacnet/proplist.c
+	${SRC_DIR}/bacnet/timestamp.c
 	${SRC_DIR}/bacnet/wp.c
+	${SRC_DIR}/bacnet/weeklyschedule.c
+	${SRC_DIR}/bacnet/bactimevalue.c
+	${SRC_DIR}/bacnet/dailyschedule.c
     # Test and test library files
 	./src/main.c
 	${ZTST_DIR}/ztest_mock.c

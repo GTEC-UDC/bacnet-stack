@@ -27,6 +27,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "bacnet/bacnet_stack_exports.h"
+#include "bacnet/basic/sys/platform.h"
 #include "bacnet/bacdef.h"
 #include "bacnet/bacenum.h"
 
@@ -61,6 +62,9 @@ typedef struct router_port_t {
     struct router_port_t *next;         /**< Point to next in linked list */
 } BACNET_ROUTER_PORT;
 
+#define NETWORK_NUMBER_LEARNED 0
+#define NETWORK_NUMBER_CONFIGURED 1
+
 #ifdef __cplusplus
 extern "C" {
 #endif /* __cplusplus */
@@ -84,10 +88,18 @@ extern "C" {
         BACNET_MESSAGE_PRIORITY priority);
 
     BACNET_STACK_EXPORT
+    void npdu_encode_npdu_network(
+        BACNET_NPDU_DATA *npdu_data,
+        BACNET_NETWORK_MESSAGE_TYPE network_message_type,
+        bool data_expecting_reply,
+        BACNET_MESSAGE_PRIORITY priority);
+
+    BACNET_STACK_EXPORT
     void npdu_copy_data(
         BACNET_NPDU_DATA * dest,
         BACNET_NPDU_DATA * src);
 
+    BACNET_STACK_DEPRECATED("Use bacnet_npdu_decode() instead")
     BACNET_STACK_EXPORT
     int npdu_decode(
         uint8_t * npdu,

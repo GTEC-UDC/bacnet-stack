@@ -69,6 +69,7 @@ extern "C" {
     /* tail */
     BACNET_STACK_EXPORT
     volatile void *Ringbuf_Peek(RING_BUFFER const *b);
+    BACNET_STACK_EXPORT
     bool Ringbuf_Pop(RING_BUFFER * b,
         uint8_t * data_element);
     BACNET_STACK_EXPORT
@@ -85,6 +86,7 @@ extern "C" {
     /* pair of functions to use head memory directly */
     BACNET_STACK_EXPORT
     volatile void *Ringbuf_Data_Peek(RING_BUFFER * b);
+    BACNET_STACK_EXPORT
     volatile void *Ringbuf_Peek_Next(RING_BUFFER const *b,
         uint8_t * data_element);
     BACNET_STACK_EXPORT
@@ -95,18 +97,6 @@ extern "C" {
         volatile uint8_t * buffer,
         unsigned element_size,
         unsigned element_count);
-
-#ifdef BAC_TEST
-#include "ctest.h"
-    BACNET_STACK_EXPORT
-    void testRingBufPowerOfTwo(Test * pTest);
-    BACNET_STACK_EXPORT
-    void testRingBufSizeSmall(Test * pTest);
-    BACNET_STACK_EXPORT
-    void testRingBufSizeLarge(Test * pTest);
-    BACNET_STACK_EXPORT
-    void testRingBufSizeInvalid(Test * pTest);
-#endif
 
 #ifdef __cplusplus
 }

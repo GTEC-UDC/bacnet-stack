@@ -51,11 +51,11 @@ static get_event_info_function Get_Event_Info[MAX_BACNET_OBJECT_TYPE];
 void ge_ack_print_data(
     BACNET_GET_EVENT_INFORMATION_DATA *data, uint32_t device_id)
 {
+    unsigned int count = 0;
     BACNET_GET_EVENT_INFORMATION_DATA *act_data = data;
     const char *state_strs[] = { "NO", "FA", "ON", "HL", "LL" };
     printf("DeviceID\tType\tInstance\teventState\n");
     printf("--------------- ------- --------------- ---------------\n");
-    int count = 0;
     while (act_data) {
         printf("%u\t\t%u\t%u\t\t%s\n", device_id,
             act_data->objectIdentifier.type,
@@ -169,7 +169,7 @@ void handler_get_event_information(uint8_t *service_request,
                         (apdu_len >= MAX_APDU - 2)) {
                         /* Device must be able to fit minimum
                            one event information.
-                           Length of one event informations needs
+                           Length of one event information needs
                            more than 50 octets. */
                         if ((service_data->max_resp < 128) ||
                             (MAX_APDU < 128)) {

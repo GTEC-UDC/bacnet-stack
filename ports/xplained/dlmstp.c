@@ -123,21 +123,21 @@ static volatile uint8_t Nmax_info_frames = MSTP_PDU_PACKET_COUNT;
 /* its value shall be 127. */
 static volatile uint8_t Nmax_master = 127;
 
-/* The time without a DataAvailable or ReceiveError event before declaration */
-/* of loss of token: 500 milliseconds. */
-#define Tno_token 500
-
 /* The minimum time without a DataAvailable or ReceiveError event */
 /* that a node must wait for a station to begin replying to a */
 /* confirmed request: 255 milliseconds. (Implementations may use */
 /* larger values for this timeout, not to exceed 300 milliseconds.) */
+#ifndef Treply_timeout
 #define Treply_timeout 260
+#endif
 
 /* The time without a DataAvailable or ReceiveError event that a node must */
 /* wait for a remote node to begin using a token or replying to a Poll For */
 /* Master frame: 20 milliseconds. (Implementations may use larger values for */
 /* this timeout, not to exceed 35 milliseconds.) */
+#ifndef Tusage_timeout
 #define Tusage_timeout 30
+#endif
 
 /* The minimum number of DataAvailable or ReceiveError events that must be */
 /* seen by a receiving node in order to declare the line "active": 4. */
@@ -149,21 +149,16 @@ static volatile uint8_t Nmax_master = 127;
 /* not to exceed 100 milliseconds.) */
 /* At 9600 baud, 60 bit times would be about 6.25 milliseconds */
 /* const uint16_t Tframe_abort = 1 + ((1000 * 60) / 9600); */
+#ifndef Tframe_abort
 #define Tframe_abort 30
+#endif
 
 /* The maximum time a node may wait after reception of a frame that expects */
 /* a reply before sending the first octet of a reply or Reply Postponed */
 /* frame: 250 milliseconds. */
+#ifndef Treply_delay
 #define Treply_delay (250 - 50)
-
-/* The width of the time slot within which a node may generate a token: */
-/* 10 milliseconds. */
-#define Tslot 10
-
-/* The maximum time a node may wait after reception of the token or */
-/* a Poll For Master frame before sending the first octet of a frame: */
-/* 15 milliseconds. */
-#define Tusage_delay 15
+#endif
 
 /* we need to be able to increment without rolling over */
 #define INCREMENT_AND_LIMIT_UINT8(x) \
@@ -244,8 +239,8 @@ static bool dlmstp_compare_data_expecting_reply(uint8_t *request_pdu,
     /* decode the request data */
     request.address.mac[0] = src_address;
     request.address.mac_len = 1;
-    offset = npdu_decode(
-        &request_pdu[0], NULL, &request.address, &request.npdu_data);
+    offset = bacnet_npdu_decode(request_pdu, request_pdu_len, NULL,
+        &request.address, &request.npdu_data);
     if (request.npdu_data.network_layer_message) {
         return false;
     }
@@ -262,7 +257,8 @@ static bool dlmstp_compare_data_expecting_reply(uint8_t *request_pdu,
     /* decode the reply data */
     reply.address.mac[0] = dest_address;
     reply.address.mac_len = 1;
-    offset = npdu_decode(&reply_pdu[0], &reply.address, NULL, &reply.npdu_data);
+    offset = bacnet_npdu_decode(
+        reply_pdu, reply_pdu_len, &reply.address, NULL, &reply.npdu_data);
     if (reply.npdu_data.network_layer_message) {
         return false;
     }
@@ -814,14 +810,24 @@ static bool MSTP_Master_Node_FSM(void)
                         }
                         break;
                     case FRAME_TYPE_BACNET_DATA_NOT_EXPECTING_REPLY:
-                        /* indicate successful reception to the higher layers */
-                        MSTP_Flag.ReceivePacketPending = true;
+                        if ((DestinationAddress == MSTP_BROADCAST_ADDRESS) &&
+                            (npdu_confirmed_service(InputBuffer, DataLength))) {
+                            /* BTL test: verifies that the IUT will quietly
+                               discard any Confirmed-Request-PDU, whose
+                               destination address is a multicast or
+                               broadcast address, received from the
+                               network layer. */
+                        } else {
+                            /* indicate successful reception to higher layer */
+                            MSTP_Flag.ReceivePacketPending = true;
+                        }
                         break;
                     case FRAME_TYPE_BACNET_DATA_EXPECTING_REPLY:
-                        /* indicate successful reception to higher layers */
-                        MSTP_Flag.ReceivePacketPending = true;
-                        /* broadcast DER just remains IDLE */
-                        if (DestinationAddress != MSTP_BROADCAST_ADDRESS) {
+                        if (DestinationAddress == MSTP_BROADCAST_ADDRESS) {
+                            /* broadcast DER just remains IDLE */
+                        } else {
+                            /* indicate successful reception to higher layers */
+                            MSTP_Flag.ReceivePacketPending = true;
                             Master_State =
                                 MSTP_MASTER_STATE_ANSWER_DATA_REQUEST;
                         }

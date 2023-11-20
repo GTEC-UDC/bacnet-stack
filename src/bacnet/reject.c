@@ -77,6 +77,9 @@ BACNET_REJECT_REASON reject_convert_error_code(BACNET_ERROR_CODE error_code)
         case ERROR_CODE_REJECT_UNRECOGNIZED_SERVICE:
             reject_code = REJECT_REASON_UNRECOGNIZED_SERVICE;
             break;
+        case ERROR_CODE_INVALID_DATA_ENCODING:
+            reject_code = REJECT_REASON_INVALID_DATA_ENCODING;
+            break;
         case ERROR_CODE_REJECT_PROPRIETARY:
             reject_code = REJECT_REASON_PROPRIETARY_FIRST;
             break;
@@ -90,6 +93,38 @@ BACNET_REJECT_REASON reject_convert_error_code(BACNET_ERROR_CODE error_code)
 }
 
 /**
+ * @brief Determine if a BACnetErrorCode is a BACnetRejectReason
+ * @param error_code #BACNET_ERROR_CODE enumeration
+ * @return true if the BACnet Error Code is a BACnet abort reason
+ */
+bool reject_valid_error_code(BACNET_ERROR_CODE error_code)
+{
+    bool status = false;
+
+    switch (error_code) {
+        case ERROR_CODE_REJECT_OTHER:
+        case ERROR_CODE_REJECT_BUFFER_OVERFLOW:
+        case ERROR_CODE_REJECT_INCONSISTENT_PARAMETERS:
+        case ERROR_CODE_REJECT_INVALID_PARAMETER_DATA_TYPE:
+        case ERROR_CODE_REJECT_INVALID_TAG:
+        case ERROR_CODE_REJECT_MISSING_REQUIRED_PARAMETER:
+        case ERROR_CODE_REJECT_PARAMETER_OUT_OF_RANGE:
+        case ERROR_CODE_REJECT_TOO_MANY_ARGUMENTS:
+        case ERROR_CODE_REJECT_UNDEFINED_ENUMERATION:
+        case ERROR_CODE_REJECT_UNRECOGNIZED_SERVICE:
+        case ERROR_CODE_INVALID_DATA_ENCODING:
+        case ERROR_CODE_REJECT_PROPRIETARY:
+            status = true;
+            break;
+        default:
+            break;
+    }
+
+    return status;
+}
+
+
+/**
  * @brief Convert a reject code to BACnet Error code
  * @param reject_code - code to be converted
  * @return error code converted. Anything not defined gets converted
@@ -100,6 +135,9 @@ BACNET_ERROR_CODE reject_convert_to_error_code(BACNET_REJECT_REASON reject_code)
     BACNET_ERROR_CODE error_code = ERROR_CODE_REJECT_OTHER;
 
     switch (reject_code) {
+        case REJECT_REASON_OTHER:
+            error_code = ERROR_CODE_REJECT_OTHER;
+            break;
         case REJECT_REASON_BUFFER_OVERFLOW:
             error_code = ERROR_CODE_REJECT_BUFFER_OVERFLOW;
             break;
@@ -127,8 +165,8 @@ BACNET_ERROR_CODE reject_convert_to_error_code(BACNET_REJECT_REASON reject_code)
         case REJECT_REASON_UNRECOGNIZED_SERVICE:
             error_code = ERROR_CODE_REJECT_UNRECOGNIZED_SERVICE;
             break;
-        case REJECT_REASON_OTHER:
-            error_code = ERROR_CODE_REJECT_OTHER;
+        case REJECT_REASON_INVALID_DATA_ENCODING:
+            error_code = ERROR_CODE_INVALID_DATA_ENCODING;
             break;
         default:
             if ((reject_code >= REJECT_REASON_PROPRIETARY_FIRST) &&
@@ -198,127 +236,3 @@ int reject_decode_service_request(uint8_t *apdu,
     return len;
 }
 #endif
-
-#ifdef BAC_TEST
-#include <assert.h>
-#include <string.h>
-#include "ctest.h"
-
-/* decode the whole APDU - mainly used for unit testing */
-static int reject_decode_apdu(uint8_t *apdu,
-    unsigned apdu_len,
-    uint8_t *invoke_id,
-    uint8_t *reject_reason)
-{
-    int len = 0;
-
-    if (!apdu)
-        return -1;
-    /* optional checking - most likely was already done prior to this call */
-    if (apdu_len) {
-        if (apdu[0] != PDU_TYPE_REJECT)
-            return -1;
-        if (apdu_len > 1) {
-            len = reject_decode_service_request(
-                &apdu[1], apdu_len - 1, invoke_id, reject_reason);
-        }
-    }
-
-    return len;
-}
-
-static void testRejectEncodeDecode(Test *pTest)
-{
-    uint8_t apdu[480] = { 0 };
-    int len = 0;
-    int apdu_len = 0;
-    uint8_t invoke_id = 0;
-    uint8_t reject_reason = 0;
-    uint8_t test_invoke_id = 0;
-    uint8_t test_reject_reason = 0;
-
-    len = reject_encode_apdu(&apdu[0], invoke_id, reject_reason);
-    ct_test(pTest, len != 0);
-    apdu_len = len;
-
-    len = reject_decode_apdu(
-        &apdu[0], apdu_len, &test_invoke_id, &test_reject_reason);
-    ct_test(pTest, len != -1);
-    ct_test(pTest, test_invoke_id == invoke_id);
-    ct_test(pTest, test_reject_reason == reject_reason);
-
-    /* change type to get negative response */
-    apdu[0] = PDU_TYPE_ABORT;
-    len = reject_decode_apdu(
-        &apdu[0], apdu_len, &test_invoke_id, &test_reject_reason);
-    ct_test(pTest, len == -1);
-
-    /* test NULL APDU */
-    len = reject_decode_apdu(
-        NULL, apdu_len, &test_invoke_id, &test_reject_reason);
-    ct_test(pTest, len == -1);
-
-    /* force a zero length */
-    len = reject_decode_apdu(&apdu[0], 0, &test_invoke_id, &test_reject_reason);
-    ct_test(pTest, len == 0);
-
-    /* check them all...   */
-    for (invoke_id = 0; invoke_id < 255; invoke_id++) {
-        for (reject_reason = 0; reject_reason < 255; reject_reason++) {
-            len = reject_encode_apdu(&apdu[0], invoke_id, reject_reason);
-            apdu_len = len;
-            ct_test(pTest, len != 0);
-            len = reject_decode_apdu(
-                &apdu[0], apdu_len, &test_invoke_id, &test_reject_reason);
-            ct_test(pTest, len != -1);
-            ct_test(pTest, test_invoke_id == invoke_id);
-            ct_test(pTest, test_reject_reason == reject_reason);
-        }
-    }
-}
-
-static void testRejectErrorCode(Test *pTest)
-{
-    int i;
-    BACNET_ERROR_CODE error_code;
-    BACNET_REJECT_REASON reject_reason;
-    BACNET_REJECT_REASON test_reject_reason;
-
-    for (i = 0; i < MAX_BACNET_REJECT_REASON; i++) {
-        reject_reason = (BACNET_REJECT_REASON)i;
-        error_code = reject_convert_to_error_code(reject_reason);
-        test_reject_reason = reject_convert_error_code(error_code);
-        if (test_reject_reason != reject_reason) {
-            printf("Reject: result=%u reject-code=%u\n", test_reject_reason,
-                reject_reason);
-        }
-        ct_test(pTest, test_reject_reason == reject_reason);
-    }
-}
-
-void testReject(Test *pTest)
-{
-    testRejectEncodeDecode(pTest);
-    testRejectErrorCode(pTest);
-}
-
-#ifdef TEST_REJECT
-int main(void)
-{
-    Test *pTest;
-    bool rc;
-
-    pTest = ct_create("BACnet Reject", NULL);
-    /* individual tests */
-    rc = ct_addTestFunction(pTest, testReject);
-    assert(rc);
-
-    ct_setStream(pTest, stdout);
-    ct_run(pTest);
-    (void)ct_report(pTest);
-    ct_destroy(pTest);
-
-    return 0;
-}
-#endif /* TEST_REJECT */
-#endif /* BAC_TEST */
