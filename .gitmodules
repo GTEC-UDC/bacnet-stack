@@ -1,3 +1,6 @@
 [submodule "lib/cJSON"]
 	path = lib/cJSON
 	url = https://github.com/DaveGamble/cJSON
+[submodule "lib/libcsv"]
+	path = lib/libcsv
+	url = https://github.com/rgamble/libcsv
