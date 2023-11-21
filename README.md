@@ -1,35 +1,52 @@
-# BACnet Stack 
+# BACnet Stack
 
 This is a fork of [bacnet-stack](https://github.com/bacnet-stack/bacnet-stack) with two new apps: `readpropmjson` and `readpropmbyname`. These apps are based on the `bacrpm` app and provide additional functionalities.
 
 The `bacrpm` app included in [bacnet-stack](https://github.com/bacnet-stack/bacnet-stack) allows reading multiple BACnet properties. Its usage is as follows:
-```
+
+```bash
 bacrpm device-instance 
     object-type object-instance property[index][,property[index]]
     [object-type ...] [--version][--help]
 ```
 
-The `readpropmjson` app is a new app based on `bacrpm` that returns the retrieved BACnet values in a JSON format and also allows specifying the IP address of the BACnet controller. Its usage is as follows:
-```
+This application has two drawbacks:
+
+* It returns the data in a proprietary format.
+* It does not allow to connect to a BACnet/TCP controller by specifying its IP.
+
+To overcome these problems, the `readpropmjson` application has been created. This application returns the data in JSON format and also allows to specify the IP address of the BACnet controller. Its usage is as follows:
+
+```bash
 readpropmjson [--dnet N] [--dadr A] [--mac A] device-instance
     object-type object-instance property[index][,property[index]]
     [object-type ...] [--version][--help]
 ```
 
-This app requires the *cJSON* library.
+This application requires the [cJSON](https://github.com/DaveGamble/cJSON) library, included in this repository as a submodule in `lib/cJSON`.
 
-The `readpropmbyname` app is another new app based on `readpropmjson` that allows recovering the present-value properties of BACnet objects specifying just theirs names (i.e., it does not need the object-instance and object-type). For this, an object data CSV file with the information of the object names and types is required to be passed in the `--csv` parameter. Its usage is as follows:
-```
+To retrieve BACnet data with these commands the following BACnet parameters must be specified:
+
+* **Device instance**: The number that uniquely identifies the BACnet device throughout the interconnected BACnet network.
+* **Object type**: The type of object. BACnet defines 18 different object types, e.g., Analog Input, Analog Output, Analog Value, etc.
+* **Object instance**: The object instance number that uniquely identifies the object on the BACnet device.
+* **Property[index]**: The property to be read from the object. In case the property is an array, the index of the element to read can be specified.
+
+To simplify the reading of BACnet properties a new application `readpropmbyname` has been created. This application allows to retrieve the `present-value` property of BACnet objects by specifying only their names, i.e., it does not need the *object type* and *object instance* parameters. For this, it is necessary to pass to the application a `--csv` parameter with a CSV file with the information of the object names and types. The usage of this application is as follows:
+
+```bash
 readpropmbyname [--dnet N] [--dadr A] [--mac A] --id device-instance
     --csv object-data-file object-name [object-name ...]
     [--version][--help]
 ```
 
-The CSV file for this app must contain at least the columns `name`, `type_value`, and `address`. An example of this file and a python script for creating it from a BACnet/IP controller is provided in the [bacnet_get_objects_props](https://github.com/tombolano/bacnet_get_objects_props) repository.
+The CSV file for this application must contain at least the columns `name`, `type_value`, and `address`. An example of this file and a Python script for creating it from a BACnet/IP controller is provided in the [bacnet_get_objects_props](https://github.com/tombolano/bacnet_get_objects_props) repository.
 
-This app requires the *cJSON*, *glib-2.0*, and *libcsv* libraries.
+This application requires the [cJSON](https://github.com/DaveGamble/cJSON), [glib-2.0](https://docs.gtk.org/glib/), and [libcsv](https://github.com/rgamble/libcsv) libraries. The cJSON and libcsv libraries are included as submodules in the `lib` directory.
 
-For additional information of these apps see the included help using the `--help` option.
+To compile the code first run `git submodule update` and then run `make`. Optionally, the new applications can be also compiled with static linking, to do so call `make` with the parameter `STATIC=1`, in this case the package glibc-static is required.
+
+For additional information about these applications see the included help using the `--help` option.
 
 The original README of the [bacnet-stack](https://github.com/bacnet-stack/bacnet-stack) project is included below.
 
