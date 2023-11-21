@@ -10,6 +10,9 @@
 # Passing parameters via command line or from Makefile export to this one
 BACNET_DEFINES ?=
 
+# Root directory
+BACNET_DIR =  $(realpath ../)
+
 # BACnet Library
 BACNET_LIB_DIR = $(realpath ./lib)
 BACNET_LIB_NAME = bacnet
