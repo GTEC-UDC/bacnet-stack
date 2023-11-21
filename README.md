@@ -44,7 +44,7 @@ The CSV file for this application must contain at least the columns `name`, `typ
 
 This application requires the [cJSON](https://github.com/DaveGamble/cJSON), [glib-2.0](https://docs.gtk.org/glib/), and [libcsv](https://github.com/rgamble/libcsv) libraries. The cJSON and libcsv libraries are included as submodules in the `lib` directory.
 
-To compile the code first run `git submodule update` and then run `make`. Optionally, the new applications can be also compiled with static linking, to do so call `make` with the parameter `STATIC=1`, in this case the package glibc-static is required.
+To compile the code first run `git submodule update --init` and then run `make`. Optionally, the new applications can be also compiled with static linking, to do so call `make` with the parameter `STATIC=1`, in this case the package glibc-static is required.
 
 For additional information about these applications see the included help using the `--help` option.
 
